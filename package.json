@@ -1,0 +1,46 @@
+{
+  "name": "jdt-lsp-cli",
+  "version": "1.1.0",
+  "description": "CLI tool for Java LSP operations, enabling AI agents to call Java language features from the command line",
+  "main": "dist/index.js",
+  "bin": {
+    "jls": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "start": "node dist/cli.js",
+    "link": "npm run build && npm link",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["java", "lsp", "cli", "jdt", "eclipse", "ai", "agent", "call-hierarchy", "language-server"],
+  "author": "juqi123 <liuyulong159@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yulongliu-dou/JDT-LSP-CLI.git"
+  },
+  "homepage": "https://github.com/yulongliu-dou/JDT-LSP-CLI#readme",
+  "bugs": {
+    "url": "https://github.com/yulongliu-dou/JDT-LSP-CLI/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "commander": "^12.0.0",
+    "glob": "^10.3.0",
+    "vscode-jsonrpc": "^8.2.0",
+    "vscode-languageserver-protocol": "^3.17.5"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/node": "^20.x",
+    "typescript": "^5.x"
+  }
+}
