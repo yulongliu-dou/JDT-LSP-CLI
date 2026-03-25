@@ -24,8 +24,18 @@
  * getDaemonStatus();  // 获取状态
  * stopDaemon();       // 停止守护进程
  * ```
+ * 
+ * 配置文件:
+ * 
+ * ```typescript
+ * import { loadConfig, generateConfigTemplate, CONFIG_FILE } from 'jdt-lsp-cli';
+ * 
+ * generateConfigTemplate();  // 生成配置文件模板
+ * const config = loadConfig();  // 加载配置
+ * console.log(config.jvm.xmx);  // '2g'
+ * ```
  */
 
-export { JdtLsClient } from './jdtClient';
+export { JdtLsClient, loadConfig, generateConfigTemplate, CONFIG_DIR, CONFIG_FILE, DEFAULT_JVM_CONFIG } from './jdtClient';
 export { startDaemon, getDaemonStatus, stopDaemon, DAEMON_PORT, DAEMON_PID_FILE } from './daemon';
 export * from './types';

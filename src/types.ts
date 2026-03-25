@@ -53,6 +53,35 @@ export interface CLIOptions {
   verbose?: boolean;        // Verbose logging
 }
 
+/**
+ * JVM 配置
+ */
+export interface JvmConfig {
+  xms: string;                      // 初始堆大小，如 '256m'
+  xmx: string;                      // 最大堆大小，如 '2g'
+  useG1GC: boolean;                 // 使用 G1 垃圾收集器
+  maxGCPauseMillis: number;         // 最大 GC 暂停时间（毫秒）
+  useStringDeduplication: boolean;  // 启用字符串去重
+  softRefLRUPolicyMSPerMB: number;  // 软引用清理策略
+  extraArgs: string[];              // 额外的 JVM 参数
+}
+
+/**
+ * 守护进程配置
+ */
+export interface DaemonConfigOptions {
+  port: number;              // HTTP 服务端口
+  idleTimeoutMinutes: number; // 空闲超时（分钟），0 表示不超时
+}
+
+/**
+ * 完整配置文件结构
+ */
+export interface DaemonConfig {
+  jvm: JvmConfig;
+  daemon: DaemonConfigOptions;
+}
+
 export interface CLIResult<T> {
   success: boolean;
   data?: T;

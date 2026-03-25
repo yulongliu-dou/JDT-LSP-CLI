@@ -24,7 +24,7 @@ import { Command } from 'commander';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
-import { JdtLsClient } from './jdtClient';
+import { JdtLsClient, loadConfig, generateConfigTemplate, CONFIG_FILE, DEFAULT_JVM_CONFIG } from './jdtClient';
 import { CLIResult } from './types';
 import { startDaemon, getDaemonStatus, stopDaemon, DAEMON_PORT } from './daemon';
 
@@ -34,7 +34,7 @@ const program = new Command();
 program
   .name('jls')
   .description('Java LSP CLI - Fast Java language features for AI agents (with daemon support)')
-  .version('1.0.0')
+  .version('1.2.0')
   .option('-p, --project <path>', 'Java project root directory', process.cwd())
   .option('--jdtls-path <path>', 'Path to eclipse.jdt.ls server')
   .option('--data-dir <path>', 'JDT LS data directory')
@@ -236,6 +236,52 @@ daemonCmd
       console.error('Failed to stop daemon');
       process.exit(1);
     }
+  });
+
+// ========== 配置文件管理命令 ==========
+const configCmd = program
+  .command('config')
+  .description('Manage JDT LSP CLI configuration');
+
+configCmd
+  .command('init')
+  .description('Create default configuration file')
+  .option('-f, --force', 'Overwrite existing config file')
+  .action((cmdOpts) => {
+    if (fs.existsSync(CONFIG_FILE) && !cmdOpts.force) {
+      console.log(`Config file already exists: ${CONFIG_FILE}`);
+      console.log('Use --force to overwrite');
+      process.exit(1);
+    }
+    generateConfigTemplate();
+    console.log('You can now edit the config file to customize JVM parameters.');
+  });
+
+configCmd
+  .command('show')
+  .description('Show current configuration')
+  .action(() => {
+    const config = loadConfig();
+    console.log(`Config file: ${CONFIG_FILE}`);
+    console.log(`File exists: ${fs.existsSync(CONFIG_FILE)}`);
+    console.log('');
+    console.log('Current configuration:');
+    console.log(JSON.stringify(config, null, 2));
+  });
+
+configCmd
+  .command('path')
+  .description('Show configuration file path')
+  .action(() => {
+    console.log(CONFIG_FILE);
+  });
+
+configCmd
+  .command('defaults')
+  .description('Show default JVM configuration')
+  .action(() => {
+    console.log('Default JVM configuration:');
+    console.log(JSON.stringify(DEFAULT_JVM_CONFIG, null, 2));
   });
 
 daemonCmd

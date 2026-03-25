@@ -86,7 +86,103 @@ jls --no-daemon def src/Main.java 10 5
 |------|------|
 | PID 文件 | `~/.jdt-lsp-cli/daemon.pid` |
 | 日志文件 | `~/.jdt-lsp-cli/daemon.log` |
+| 配置文件 | `~/.jdt-lsp-cli/config.json` |
 | 索引缓存 | `~/.jdt-lsp-cli/data/<project-hash>/` |
+
+## JVM 配置与内存优化
+
+v1.2.0 引入了配置文件支持，可自定义 JVM 参数以优化内存占用和稳定性。
+
+### 配置命令
+
+```bash
+# 创建默认配置文件
+jls config init
+
+# 查看当前配置
+jls config show
+
+# 查看配置文件路径
+jls config path
+
+# 查看默认 JVM 配置
+jls config defaults
+```
+
+### 配置文件结构
+
+`~/.jdt-lsp-cli/config.json`:
+
+```json
+{
+  "jvm": {
+    "xms": "256m",                    // 初始堆大小
+    "xmx": "2g",                      // 最大堆大小
+    "useG1GC": true,                  // 使用 G1 垃圾收集器
+    "maxGCPauseMillis": 200,          // 最大 GC 暂停时间（毫秒）
+    "useStringDeduplication": true,   // 启用字符串去重
+    "softRefLRUPolicyMSPerMB": 50,    // 软引用清理策略
+    "extraArgs": []                   // 额外 JVM 参数
+  },
+  "daemon": {
+    "port": 9876,                     // 守护进程端口
+    "idleTimeoutMinutes": 30          // 空闲超时（分钟，0=不超时）
+  }
+}
+```
+
+### JVM 参数说明
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `xms` | `256m` | 初始堆内存，低起始内存占用 |
+| `xmx` | `2g` | 最大堆内存，防止内存无限增长 |
+| `useG1GC` | `true` | G1 垃圾收集器，低延迟、内存友好 |
+| `maxGCPauseMillis` | `200` | 控制 GC 暂停时间，保证响应性 |
+| `useStringDeduplication` | `true` | 字符串去重（G1GC 专属），减少内存 |
+| `softRefLRUPolicyMSPerMB` | `50` | 软引用清理迟钙，值越小清理越快 |
+| `extraArgs` | `[]` | 自定义 JVM 参数，如 `-XX:+PrintGC` |
+
+### 内存优化建议
+
+**低内存机器（8GB RAM）：**
+```json
+{
+  "jvm": {
+    "xms": "128m",
+    "xmx": "512m"
+  }
+}
+```
+
+**中等内存机器（16GB RAM）：**
+```json
+{
+  "jvm": {
+    "xms": "256m",
+    "xmx": "1g"
+  }
+}
+```
+
+**高内存机器/大型项目：**
+```json
+{
+  "jvm": {
+    "xms": "512m",
+    "xmx": "4g"
+  }
+}
+```
+
+### 应用配置
+
+修改配置文件后需要重启守护进程：
+
+```bash
+jls daemon stop
+jls daemon start
+```
 
 ## 命令概览
 
@@ -391,7 +487,8 @@ npm link
 jdt-lsp-cli
 ├── src/
 │   ├── cli.ts        # 命令行入口
-│   ├── jdtClient.ts  # LSP 客户端核心
+│   ├── daemon.ts     # 守护进程 HTTP 服务
+│   ├── jdtClient.ts  # LSP 客户端核心 + JVM 配置
 │   ├── types.ts      # 类型定义
 │   └── index.ts      # 库导出
 └── dist/             # 编译输出

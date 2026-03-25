@@ -13,7 +13,71 @@ import {
   StreamMessageReader,
   StreamMessageWriter,
 } from 'vscode-jsonrpc/node';
-import { CLIOptions, SymbolKindMap } from './types';
+import { CLIOptions, SymbolKindMap, JvmConfig, DaemonConfig } from './types';
+
+// 配置文件路径
+export const CONFIG_DIR = path.join(os.homedir(), '.jdt-lsp-cli');
+export const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+
+// 默认 JVM 配置（低内存占用 + 稳定性优化）
+export const DEFAULT_JVM_CONFIG: JvmConfig = {
+  xms: '256m',
+  xmx: '2g',
+  useG1GC: true,
+  maxGCPauseMillis: 200,
+  useStringDeduplication: true,
+  softRefLRUPolicyMSPerMB: 50,
+  extraArgs: [],
+};
+
+/**
+ * 加载用户配置文件
+ */
+export function loadConfig(): DaemonConfig {
+  const defaultConfig: DaemonConfig = {
+    jvm: { ...DEFAULT_JVM_CONFIG },
+    daemon: {
+      port: 9876,
+      idleTimeoutMinutes: 30,
+    },
+  };
+
+  if (!fs.existsSync(CONFIG_FILE)) {
+    return defaultConfig;
+  }
+
+  try {
+    const userConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    // 深度合并配置
+    return {
+      jvm: { ...defaultConfig.jvm, ...userConfig.jvm },
+      daemon: { ...defaultConfig.daemon, ...userConfig.daemon },
+    };
+  } catch (e) {
+    console.error('Warning: Failed to parse config file, using defaults:', e);
+    return defaultConfig;
+  }
+}
+
+/**
+ * 生成配置文件模板
+ */
+export function generateConfigTemplate(): void {
+  if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+
+  const template: DaemonConfig = {
+    jvm: DEFAULT_JVM_CONFIG,
+    daemon: {
+      port: 9876,
+      idleTimeoutMinutes: 30,
+    },
+  };
+
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(template, null, 2), 'utf-8');
+  console.log(`Config file created: ${CONFIG_FILE}`);
+}
 
 export class JdtLsClient {
   private connection: MessageConnection | null = null;
@@ -22,13 +86,17 @@ export class JdtLsClient {
   private initialized = false;
   private openedFiles = new Set<string>();
   private javaExecutable: string = 'java';
+  private jvmConfig: JvmConfig;
 
-  constructor(options: CLIOptions) {
+  constructor(options: CLIOptions, jvmConfig?: Partial<JvmConfig>) {
     this.options = {
       timeout: 60000,
       verbose: false,
       ...options,
     };
+    // 合并 JVM 配置：默认值 < 配置文件 < 构造参数
+    const config = loadConfig();
+    this.jvmConfig = { ...config.jvm, ...jvmConfig };
   }
 
   /**
@@ -38,6 +106,41 @@ export class JdtLsClient {
     if (this.options.verbose) {
       console.error(`[JDT-CLI] ${message}`, ...args);
     }
+  }
+
+  /**
+   * 构建 JVM 参数
+   */
+  private buildJvmArgs(): string[] {
+    const args: string[] = [];
+    const cfg = this.jvmConfig;
+
+    // 内存配置
+    args.push(`-Xms${cfg.xms}`);
+    args.push(`-Xmx${cfg.xmx}`);
+
+    // G1 垃圾收集器
+    if (cfg.useG1GC) {
+      args.push('-XX:+UseG1GC');
+      args.push(`-XX:MaxGCPauseMillis=${cfg.maxGCPauseMillis}`);
+      
+      // 字符串去重（仅 G1GC 支持）
+      if (cfg.useStringDeduplication) {
+        args.push('-XX:+UseStringDeduplication');
+      }
+    }
+
+    // 软引用清理策略
+    if (cfg.softRefLRUPolicyMSPerMB > 0) {
+      args.push(`-XX:SoftRefLRUPolicyMSPerMB=${cfg.softRefLRUPolicyMSPerMB}`);
+    }
+
+    // 额外参数
+    if (cfg.extraArgs && cfg.extraArgs.length > 0) {
+      args.push(...cfg.extraArgs);
+    }
+
+    return args;
   }
 
   /**
@@ -185,8 +288,15 @@ export class JdtLsClient {
       fs.mkdirSync(dataDir, { recursive: true });
     }
 
+    // 构建 JVM 参数
+    const jvmArgs = this.buildJvmArgs();
+    this.log('JVM Config:', this.jvmConfig);
+
     // 构建启动参数 (参考 jdtls.py)
     const javaArgs = [
+      // JVM 内存与 GC 参数
+      ...jvmArgs,
+      // Eclipse/OSGi 参数
       '-Declipse.application=org.eclipse.jdt.ls.core.id1',
       '-Dosgi.bundles.defaultStartLevel=4',
       '-Declipse.product=org.eclipse.jdt.ls.core.product',
@@ -194,10 +304,11 @@ export class JdtLsClient {
       `-Dosgi.sharedConfiguration.area=${configDir}`,
       '-Dosgi.sharedConfiguration.area.readOnly=true',
       '-Dosgi.configuration.cascaded=true',
-      '-Xms1G',
+      // Java 模块系统参数
       '--add-modules=ALL-SYSTEM',
       '--add-opens', 'java.base/java.util=ALL-UNNAMED',
       '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
+      // Launcher
       '-jar', launcherJar,
       '-data', dataDir,
     ];
