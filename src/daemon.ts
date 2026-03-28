@@ -11,7 +11,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { JdtLsClient } from './jdtClient';
-import { CLIOptions, CLIResult } from './types';
+import { CLIOptions, CLIResult, SymbolInfo } from './types';
+import { resolveSymbol, buildSymbolQuery, isSymbolMode } from './symbolResolver';
 
 // 守护进程配置
 const DEFAULT_PORT = 9876;
@@ -114,6 +115,54 @@ function sendResponse<T>(res: http.ServerResponse, result: CLIResult<T>) {
 }
 
 /**
+ * 解析符号位置（如果使用符号模式）
+ */
+async function resolvePosition(
+  body: any,
+  client: JdtLsClient
+): Promise<{ line: number; col: number } | CLIResult<any>> {
+  // 检查是否使用符号模式
+  const symbolQuery = buildSymbolQuery({
+    method: body.method,
+    symbol: body.symbol,
+    container: body.container,
+    signature: body.signature,
+    index: body.index,
+    kind: body.kind,
+  });
+  
+  if (!symbolQuery) {
+    // 传统模式：使用行列参数
+    if (!body.line || !body.col) {
+      return {
+        success: false,
+        error: 'Position required: either provide line/col or use method/symbol parameter',
+        elapsed: 0,
+      };
+    }
+    return { line: parseInt(body.line), col: parseInt(body.col) };
+  }
+  
+  // 符号模式：先获取文档符号，再解析位置
+  const symbols: SymbolInfo[] = await client.getDocumentSymbols(body.file);
+  const result = resolveSymbol(symbols, symbolQuery);
+  
+  if (!result.success) {
+    return {
+      success: false,
+      error: result.error.message,
+      data: { resolution_error: result.error },
+      elapsed: 0,
+    };
+  }
+  
+  return {
+    line: result.position.line,
+    col: result.position.character,
+  };
+}
+
+/**
  * 处理请求
  */
 async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
@@ -203,21 +252,35 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     let result: any;
     
     switch (pathname) {
-      case '/definition':
-        if (!file || !line || !col) {
-          throw new Error('Missing parameters: file, line, col');
+      case '/definition': {
+        if (!file) {
+          throw new Error('Missing parameter: file');
         }
-        result = await client.getDefinition(file, parseInt(line), parseInt(col));
+        // 解析位置（支持符号模式）
+        const posResult = await resolvePosition(body, client);
+        if ('success' in posResult) {
+          sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
+          return;
+        }
+        result = await client.getDefinition(file, posResult.line, posResult.col);
         break;
+      }
         
-      case '/references':
-        if (!file || !line || !col) {
-          throw new Error('Missing parameters: file, line, col');
+      case '/references': {
+        if (!file) {
+          throw new Error('Missing parameter: file');
+        }
+        // 解析位置（支持符号模式）
+        const posResult = await resolvePosition(body, client);
+        if ('success' in posResult) {
+          sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
+          return;
         }
         const includeDecl = body.includeDeclaration !== false;
-        const refs = await client.getReferences(file, parseInt(line), parseInt(col), includeDecl);
+        const refs = await client.getReferences(file, posResult.line, posResult.col, includeDecl);
         result = { references: refs, count: refs.length };
         break;
+      }
         
       case '/symbols':
         if (!file) {
@@ -238,29 +301,50 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         result = { symbols, count: body.flat ? symbols.length : undefined };
         break;
         
-      case '/implementations':
-        if (!file || !line || !col) {
-          throw new Error('Missing parameters: file, line, col');
+      case '/implementations': {
+        if (!file) {
+          throw new Error('Missing parameter: file');
         }
-        const impls = await client.getImplementations(file, parseInt(line), parseInt(col));
+        // 解析位置（支持符号模式）
+        const posResult = await resolvePosition(body, client);
+        if ('success' in posResult) {
+          sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
+          return;
+        }
+        const impls = await client.getImplementations(file, posResult.line, posResult.col);
         result = { implementations: impls, count: impls.length };
         break;
+      }
         
-      case '/hover':
-        if (!file || !line || !col) {
-          throw new Error('Missing parameters: file, line, col');
+      case '/hover': {
+        if (!file) {
+          throw new Error('Missing parameter: file');
         }
-        result = await client.getHover(file, parseInt(line), parseInt(col));
+        // 解析位置（支持符号模式）
+        const posResult = await resolvePosition(body, client);
+        if ('success' in posResult) {
+          sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
+          return;
+        }
+        result = await client.getHover(file, posResult.line, posResult.col);
         break;
+      }
         
-      case '/call-hierarchy':
-        if (!file || !line || !col) {
-          throw new Error('Missing parameters: file, line, col');
+      case '/call-hierarchy': {
+        if (!file) {
+          throw new Error('Missing parameter: file');
         }
+        // 解析位置（支持符号模式）
+        const posResult = await resolvePosition(body, client);
+        if ('success' in posResult) {
+          sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
+          return;
+        }
+        const { line: posLine, col: posCol } = posResult;
         const maxDepth = body.depth || 5;
         const incoming = body.incoming || false;
         
-        const items = await client.prepareCallHierarchy(file, parseInt(line), parseInt(col));
+        const items = await client.prepareCallHierarchy(file, posLine, posCol);
         if (!items || items.length === 0) {
           result = { entry: null, calls: [], totalMethods: 0 };
         } else {
@@ -299,6 +383,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           };
         }
         break;
+      }
         
       default:
         sendResponse(res, {

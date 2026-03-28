@@ -7,6 +7,55 @@ export interface Position {
   character: number; // 1-based column number
 }
 
+// ========== 符号定位查询类型 ==========
+
+/**
+ * 符号查询参数 - 用于通过符号名称定位位置
+ */
+export interface SymbolQuery {
+  name: string;              // 符号名称 (必填)
+  kind?: string;             // 符号类型: Method, Field, Class, Interface...
+  container?: string;        // 父容器路径: "MyClass" 或 "MyClass.innerMethod"
+  signature?: string;        // 方法签名: "(String, int)" 用于区分重载
+  index?: number;            // 同名符号索引: 0, 1, 2... (备选方案)
+}
+
+/**
+ * 符号解析结果
+ */
+export interface ResolvedPosition {
+  line: number;              // 1-based 行号
+  character: number;         // 1-based 列号
+  confidence: 'exact' | 'partial' | 'ambiguous';  // 匹配置信度
+  matchedSymbol: string;     // 完整匹配路径
+  alternatives?: string[];   // 如有歧义，列出候选
+}
+
+/**
+ * 符号解析错误
+ */
+export interface SymbolResolutionError {
+  type: 'not_found' | 'ambiguous' | 'invalid_query';
+  message: string;
+  suggestions?: {
+    availableSymbols?: string[];      // 文件中可用的符号列表
+    similarNames?: string[];          // 相似名称建议
+    overloadOptions?: string[];       // 重载方法的签名列表
+  };
+}
+
+/**
+ * 符号信息（从 documentSymbol 返回）
+ */
+export interface SymbolInfo {
+  name: string;
+  kind: string;
+  detail?: string;
+  range: Range;
+  selectionRange: Range;
+  children?: SymbolInfo[];
+}
+
 export interface Range {
   start: Position;
   end: Position;

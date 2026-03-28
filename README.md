@@ -195,6 +195,84 @@ jls daemon start
 | `implementations` | `impl` | 查找接口/抽象方法实现 |
 | `hover` | - | 获取悬停信息（类型、文档） |
 
+## 符号定位功能（v1.3.0+）
+
+所有位置敏感命令（除 `symbols` 外）现在支持 **基于符号名称自动定位**，无需手动指定行列位置。这对 AI Agent 特别有用，可以直接通过符号名称调用 LSP 功能。
+
+### 符号定位选项
+
+| 选项 | 说明 | 示例 |
+|------|------|------|
+| `--method <name>` | 方法名定位 | `--method processOrder` |
+| `--symbol <name>` | 符号名定位（类、字段等） | `--symbol UserService` |
+| `--container <path>` | 父容器路径（用于嵌套符号） | `--container "MyClass.innerMethod"` |
+| `--signature <sig>` | 方法签名（区分重载） | `--signature "(String, int)"` |
+| `--index <n>` | 同名符号索引（0-based） | `--index 1` |
+| `--kind <type>` | 符号类型 | `--kind Method` |
+
+### 使用示例
+
+```bash
+# 基础用法 - 通过方法名定位（无重载）
+jls call-hierarchy ./OrderService.java --method processOrder
+
+# 有重载方法 - 使用签名区分
+jls definition ./UserService.java --method findUser --signature "(Long)"
+
+# 嵌套符号 - Lambda 中的方法
+jls call-hierarchy ./StreamExample.java --container "MyClass.processItems" --method "lambda$0"
+
+# 字段引用
+jls references ./Config.java --symbol API_KEY --kind Field
+
+# 接口实现查找
+jls implementations ./PaymentGateway.java --symbol charge --kind Method
+
+# 内部类方法
+jls hover ./Outer.java --container "Outer.Inner" --method doWork
+
+# 使用索引消歧（当有多个同名符号时）
+jls definition ./Test.java --method process --index 1
+```
+
+### 三级精度匹配
+
+| 级别 | 方式 | 适用场景 |
+|------|------|----------|
+| L1 | 仅名称 | 无重载、名称唯一 |
+| L2 | 名称+签名 | 有重载方法 |
+| L3 | 名称+索引 | 签名复杂或无法识别 |
+
+### 错误处理与 AI 自修正
+
+当符号定位失败或有歧义时，返回结构化信息帮助 AI 自我修正：
+
+```json
+{
+  "success": false,
+  "error": "Found 3 methods named 'process'. Please specify --signature or --index.",
+  "data": {
+    "resolution_error": {
+      "type": "ambiguous",
+      "message": "Found 3 methods named 'process'. Please specify --signature or --index.",
+      "suggestions": {
+        "overloadOptions": [
+          "process [Method] - process(String) : void",
+          "process [Method] - process(String, int) : boolean",
+          "process [Method] - process(Order) : Result"
+        ]
+      }
+    }
+  }
+}
+```
+
+### 兼容性
+
+- 保留原有 `<file> <line> <col>` 参数方式
+- 新旧方式互斥，优先使用 `--method/--symbol`
+- 守护进程和直接模式均支持
+
 ## 全局选项
 
 ```bash
@@ -218,20 +296,27 @@ jls [command] [options]
 获取指定方法的调用链，分析方法调用了哪些其他方法。
 
 ```bash
-jls ch <file> <line> <col> [options]
+jls ch <file> [line] [col] [options]
 
 选项:
-  -d, --depth <n>    最大递归深度 (默认: 5)
-  --incoming         获取被调用关系（谁调用了我）
+  -d, --depth <n>       最大递归深度 (默认: 5)
+  --incoming            获取被调用关系（谁调用了我）
+  --method <name>       通过方法名自动定位
+  --container <path>    父容器路径
+  --signature <sig>     方法签名（区分重载）
+  --index <n>           同名符号索引
 ```
 
 **示例：**
 ```bash
-# 获取方法的向下调用链（深度3）
+# 传统方式：指定行列
 jls ch src/main/java/com/example/Service.java 25 10 -d 3
 
+# 符号定位：通过方法名
+jls ch src/main/java/com/example/Service.java --method execute -d 3
+
 # 获取方法的被调用关系
-jls ch src/main/java/com/example/Service.java 25 10 --incoming
+jls ch src/main/java/com/example/Service.java --method execute --incoming
 ```
 
 **输出示例：**
@@ -264,13 +349,26 @@ jls ch src/main/java/com/example/Service.java 25 10 --incoming
 获取符号（类、方法、变量）的定义位置。
 
 ```bash
-jls def <file> <line> <col>
+jls def <file> [line] [col] [options]
+
+选项:
+  --method <name>       通过方法名自动定位
+  --symbol <name>       通过符号名自动定位
+  --container <path>    父容器路径
+  --signature <sig>     方法签名（区分重载）
+  --index <n>           同名符号索引
 ```
 
 **示例：**
 ```bash
-# 获取变量定义位置
+# 传统方式：指定行列
 jls def src/main/java/com/example/App.java 30 15
+
+# 符号定位：通过符号名
+jls def src/main/java/com/example/App.java --symbol UserService
+
+# 重载方法：使用签名区分
+jls def src/main/java/com/example/App.java --method findUser --signature "(Long)"
 ```
 
 **输出示例：**
@@ -295,19 +393,31 @@ jls def src/main/java/com/example/App.java 30 15
 查找符号在整个项目中的所有引用位置。
 
 ```bash
-jls refs <file> <line> <col> [options]
+jls refs <file> [line] [col] [options]
 
 选项:
-  --no-declaration    不包含声明本身
+  --no-declaration      不包含声明本身
+  --method <name>       通过方法名自动定位
+  --symbol <name>       通过符号名自动定位
+  --container <path>    父容器路径
+  --signature <sig>     方法签名（区分重载）
+  --index <n>           同名符号索引
+  --kind <type>         符号类型 (Method, Field, Class...)
 ```
 
 **示例：**
 ```bash
-# 查找方法的所有引用
+# 传统方式：指定行列
 jls refs src/main/java/com/example/UserService.java 15 20
 
+# 符号定位：通过方法名
+jls refs src/main/java/com/example/UserService.java --method findById
+
+# 字段引用
+jls refs src/main/java/com/example/Config.java --symbol API_KEY --kind Field
+
 # 不包含声明本身
-jls refs src/main/java/com/example/UserService.java 15 20 --no-declaration
+jls refs src/main/java/com/example/UserService.java --method findById --no-declaration
 ```
 
 **输出示例：**
@@ -368,13 +478,27 @@ jls sym src/main/java/com/example/UserService.java --flat
 查找接口或抽象方法的所有实现。
 
 ```bash
-jls impl <file> <line> <col>
+jls impl <file> [line] [col] [options]
+
+选项:
+  --method <name>       通过方法名自动定位
+  --symbol <name>       通过符号名自动定位
+  --container <path>    父容器路径
+  --signature <sig>     方法签名（区分重载）
+  --index <n>           同名符号索引
+  --kind <type>         符号类型
 ```
 
 **示例：**
 ```bash
-# 查找接口方法的所有实现
+# 传统方式：指定行列
 jls impl src/main/java/com/example/Repository.java 8 10
+
+# 符号定位：通过方法名
+jls impl src/main/java/com/example/Repository.java --method save
+
+# 接口实现
+jls impl src/main/java/com/example/PaymentGateway.java --symbol charge --kind Method
 ```
 
 **输出示例：**
@@ -403,12 +527,27 @@ jls impl src/main/java/com/example/Repository.java 8 10
 获取符号的类型信息和文档注释。
 
 ```bash
-jls hover <file> <line> <col>
+jls hover <file> [line] [col] [options]
+
+选项:
+  --method <name>       通过方法名自动定位
+  --symbol <name>       通过符号名自动定位
+  --container <path>    父容器路径
+  --signature <sig>     方法签名（区分重载）
+  --index <n>           同名符号索引
+  --kind <type>         符号类型
 ```
 
 **示例：**
 ```bash
+# 传统方式：指定行列
 jls hover src/main/java/com/example/App.java 20 10
+
+# 符号定位：通过方法名
+jls hover src/main/java/com/example/App.java --method processOrder
+
+# 内部类方法
+jls hover src/main/java/com/example/Outer.java --container "Outer.Inner" --method doWork
 ```
 
 **输出示例：**
@@ -427,11 +566,20 @@ jls hover src/main/java/com/example/App.java 20 10
 
 ## 位置参数说明
 
+**传统方式（行列定位）：**
 - `<file>`: Java 源文件路径（支持相对路径和绝对路径）
 - `<line>`: 行号（从 1 开始，与 IDE 显示一致）
 - `<col>`: 列号（从 1 开始，光标在符号上的位置）
 
-**提示：** 确保光标位置在符号名称上（如方法名、类名、变量名），而不是在括号或其他位置。
+**符号定位方式（推荐 AI 使用）：**
+- `--method <name>`: 通过方法名自动定位
+- `--symbol <name>`: 通过符号名自动定位（类、字段等）
+- `--container <path>`: 指定父容器路径（用于嵌套符号、内部类、Lambda）
+- `--signature <sig>`: 方法签名（用于区分重载方法）
+- `--index <n>`: 同名符号索引（0-based）
+- `--kind <type>`: 符号类型（Method, Field, Class, Interface...）
+
+**提示：** 使用符号定位方式时，无需指定行列参数，工具会自动解析符号位置。
 
 ## 输出格式
 
@@ -486,12 +634,13 @@ npm link
 ```
 jdt-lsp-cli
 ├── src/
-│   ├── cli.ts        # 命令行入口
-│   ├── daemon.ts     # 守护进程 HTTP 服务
-│   ├── jdtClient.ts  # LSP 客户端核心 + JVM 配置
-│   ├── types.ts      # 类型定义
-│   └── index.ts      # 库导出
-└── dist/             # 编译输出
+│   ├── cli.ts            # 命令行入口
+│   ├── daemon.ts         # 守护进程 HTTP 服务
+│   ├── jdtClient.ts      # LSP 客户端核心 + JVM 配置
+│   ├── symbolResolver.ts # 符号解析器（符号名称 → 位置）
+│   ├── types.ts          # 类型定义
+│   └── index.ts          # 库导出
+└── dist/                 # 编译输出
 ```
 
 ## 许可证

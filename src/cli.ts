@@ -25,8 +25,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
 import { JdtLsClient, loadConfig, generateConfigTemplate, CONFIG_FILE, DEFAULT_JVM_CONFIG } from './jdtClient';
-import { CLIResult } from './types';
+import { CLIResult, SymbolInfo } from './types';
 import { startDaemon, getDaemonStatus, stopDaemon, DAEMON_PORT } from './daemon';
+import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult } from './symbolResolver';
 
 const program = new Command();
 
@@ -34,7 +35,7 @@ const program = new Command();
 program
   .name('jls')
   .description('Java LSP CLI - Fast Java language features for AI agents (with daemon support)')
-  .version('1.2.0')
+  .version('1.3.0')
   .option('-p, --project <path>', 'Java project root directory', process.cwd())
   .option('--jdtls-path <path>', 'Path to eclipse.jdt.ls server')
   .option('--data-dir <path>', 'JDT LS data directory')
@@ -58,6 +59,142 @@ function resolveFilePath(filePath: string, projectPath: string): string {
     return filePath;
   }
   return path.resolve(projectPath, filePath);
+}
+
+/**
+ * 通过符号名称解析位置
+ * @returns 成功返回 { line, col }，失败返回错误结果
+ */
+async function resolvePositionBySymbol(
+  filePath: string,
+  projectPath: string,
+  cmdOptions: any,
+  opts: any
+): Promise<{ line: string; col: string } | CLIResult<any>> {
+  // 符号解析需要先获取文档符号
+  const symbolQuery = buildSymbolQuery(cmdOptions);
+  if (!symbolQuery) {
+    return {
+      success: false,
+      error: 'Symbol query requires --method or --symbol option',
+      elapsed: 0,
+    };
+  }
+
+  // 获取文档符号
+  let symbols: SymbolInfo[];
+  
+  if (opts.daemon !== false) {
+    // 尝试通过守护进程获取
+    const symbolsResult = await sendDaemonRequest('/symbols', {
+      project: projectPath,
+      file: filePath,
+      options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
+    });
+    
+    if (!symbolsResult.success) {
+      // 守护进程不可用，回退到直接模式
+      let client: JdtLsClient | null = null;
+      try {
+        client = await createDirectClient(opts);
+        symbols = await client.getDocumentSymbols(filePath);
+      } catch (error: any) {
+        return {
+          success: false,
+          error: `Failed to get document symbols: ${error.message}`,
+          elapsed: 0,
+        };
+      } finally {
+        if (client) await client.stop();
+      }
+    } else {
+      symbols = symbolsResult.data?.symbols || [];
+    }
+  } else {
+    // 直接模式
+    let client: JdtLsClient | null = null;
+    try {
+      client = await createDirectClient(opts);
+      symbols = await client.getDocumentSymbols(filePath);
+    } catch (error: any) {
+      return {
+        success: false,
+        error: `Failed to get document symbols: ${error.message}`,
+        elapsed: 0,
+      };
+    } finally {
+      if (client) await client.stop();
+    }
+  }
+
+  // 解析符号位置
+  const result = resolveSymbol(symbols, symbolQuery);
+  
+  if (!result.success) {
+    return {
+      success: false,
+      error: result.error.message,
+      data: { resolution_error: result.error },
+      elapsed: 0,
+    };
+  }
+
+  return {
+    line: String(result.position.line),
+    col: String(result.position.character),
+  };
+}
+
+/**
+ * 检查是否使用符号模式，并解析位置
+ */
+async function getPosition(
+  file: string | undefined,
+  line: string | undefined,
+  col: string | undefined,
+  cmdOptions: any,
+  opts: any
+): Promise<{ filePath: string; line: string; col: string } | CLIResult<any>> {
+  const projectPath = path.resolve(opts.project);
+  
+  // 检查文件参数
+  if (!file) {
+    return {
+      success: false,
+      error: 'File path is required',
+      elapsed: 0,
+    };
+  }
+  
+  const filePath = resolveFilePath(file, projectPath);
+  
+  if (!fs.existsSync(filePath)) {
+    return {
+      success: false,
+      error: `File not found: ${filePath}`,
+      elapsed: 0,
+    };
+  }
+  
+  // 检查是否使用符号模式
+  if (isSymbolMode(cmdOptions)) {
+    const result = await resolvePositionBySymbol(filePath, projectPath, cmdOptions, opts);
+    if ('success' in result) {
+      return result; // 错误结果
+    }
+    return { filePath, line: result.line, col: result.col };
+  }
+  
+  // 传统模式：使用行列参数
+  if (!line || !col) {
+    return {
+      success: false,
+      error: 'Position required: either provide <line> <col> or use --method/--symbol option',
+      elapsed: 0,
+    };
+  }
+  
+  return { filePath, line, col };
 }
 
 /**
@@ -316,30 +453,54 @@ daemonCmd
 
 // ========== LSP 命令 ==========
 
+// 符号定位通用选项
+const symbolOptions = [
+  { flags: '--method <name>', desc: 'Method name to locate (auto-resolve position)' },
+  { flags: '--symbol <name>', desc: 'Symbol name to locate (auto-resolve position)' },
+  { flags: '--container <path>', desc: 'Parent container path, e.g., "MyClass.myMethod"' },
+  { flags: '--signature <sig>', desc: 'Method signature for overloads, e.g., "(String, int)"' },
+  { flags: '--index <n>', desc: 'Index for multiple matches (0-based)' },
+  { flags: '--kind <type>', desc: 'Symbol kind: Method, Field, Class, Interface' },
+];
+
+/**
+ * 为命令添加符号定位选项
+ */
+function addSymbolOptions(cmd: any): any {
+  for (const opt of symbolOptions) {
+    cmd = cmd.option(opt.flags, opt.desc);
+  }
+  return cmd;
+}
+
 // call-hierarchy
-program
-  .command('call-hierarchy <file> <line> <col>')
+let callHierarchyCmd = program
+  .command('call-hierarchy <file> [line] [col]')
   .alias('ch')
-  .description('Get call hierarchy for a method')
+  .description('Get call hierarchy for a method. Use --method for auto-positioning.')
   .option('-d, --depth <n>', 'Maximum recursion depth', '5')
-  .option('--incoming', 'Get incoming calls instead of outgoing', false)
-  .action(async (file: string, line: string, col: string, cmdOptions: any) => {
+  .option('--incoming', 'Get incoming calls instead of outgoing', false);
+callHierarchyCmd = addSymbolOptions(callHierarchyCmd);
+callHierarchyCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
     const opts = program.opts();
-    const filePath = resolveFilePath(file, opts.project);
     const projectPath = path.resolve(opts.project);
     
-    if (!fs.existsSync(filePath)) {
-      outputResult({ success: false, error: `File not found: ${filePath}`, elapsed: 0 });
+    // 解析位置（支持符号模式）
+    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    if ('success' in posResult) {
+      outputResult(posResult);
       return;
     }
+    
+    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
     
     await executeCommand(
       '/call-hierarchy',
       {
         project: projectPath,
         file: filePath,
-        line,
-        col,
+        line: resolvedLine,
+        col: resolvedCol,
         depth: cmdOptions.depth,
         incoming: cmdOptions.incoming,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
@@ -348,7 +509,7 @@ program
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          const items = await client.prepareCallHierarchy(filePath, parseInt(line), parseInt(col));
+          const items = await client.prepareCallHierarchy(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
           
           if (!items || items.length === 0) {
             return { entry: null, calls: [], totalMethods: 0 };
@@ -398,34 +559,38 @@ program
   });
 
 // definition
-program
-  .command('definition <file> <line> <col>')
+let definitionCmd = program
+  .command('definition <file> [line] [col]')
   .alias('def')
-  .description('Go to definition of a symbol')
-  .action(async (file: string, line: string, col: string) => {
+  .description('Go to definition of a symbol. Use --symbol for auto-positioning.');
+definitionCmd = addSymbolOptions(definitionCmd);
+definitionCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
     const opts = program.opts();
-    const filePath = resolveFilePath(file, opts.project);
     const projectPath = path.resolve(opts.project);
     
-    if (!fs.existsSync(filePath)) {
-      outputResult({ success: false, error: `File not found: ${filePath}`, elapsed: 0 });
+    // 解析位置（支持符号模式）
+    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    if ('success' in posResult) {
+      outputResult(posResult);
       return;
     }
+    
+    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
     
     await executeCommand(
       '/definition',
       {
         project: projectPath,
         file: filePath,
-        line,
-        col,
+        line: resolvedLine,
+        col: resolvedCol,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
       async () => {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          return await client.getDefinition(filePath, parseInt(line), parseInt(col));
+          return await client.getDefinition(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
         } finally {
           if (client) await client.stop();
         }
@@ -435,28 +600,32 @@ program
   });
 
 // references
-program
-  .command('references <file> <line> <col>')
+let referencesCmd = program
+  .command('references <file> [line] [col]')
   .alias('refs')
-  .description('Find all references to a symbol')
-  .option('--no-declaration', 'Exclude the declaration itself')
-  .action(async (file: string, line: string, col: string, cmdOptions: any) => {
+  .description('Find all references to a symbol. Use --symbol for auto-positioning.')
+  .option('--no-declaration', 'Exclude the declaration itself');
+referencesCmd = addSymbolOptions(referencesCmd);
+referencesCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
     const opts = program.opts();
-    const filePath = resolveFilePath(file, opts.project);
     const projectPath = path.resolve(opts.project);
     
-    if (!fs.existsSync(filePath)) {
-      outputResult({ success: false, error: `File not found: ${filePath}`, elapsed: 0 });
+    // 解析位置（支持符号模式）
+    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    if ('success' in posResult) {
+      outputResult(posResult);
       return;
     }
+    
+    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
     
     await executeCommand(
       '/references',
       {
         project: projectPath,
         file: filePath,
-        line,
-        col,
+        line: resolvedLine,
+        col: resolvedCol,
         includeDeclaration: cmdOptions.declaration !== false,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
@@ -464,7 +633,7 @@ program
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          const result = await client.getReferences(filePath, parseInt(line), parseInt(col), cmdOptions.declaration !== false);
+          const result = await client.getReferences(filePath, parseInt(resolvedLine), parseInt(resolvedCol), cmdOptions.declaration !== false);
           return { references: result, count: result.length };
         } finally {
           if (client) await client.stop();
@@ -526,34 +695,38 @@ program
   });
 
 // implementations
-program
-  .command('implementations <file> <line> <col>')
+let implementationsCmd = program
+  .command('implementations <file> [line] [col]')
   .alias('impl')
-  .description('Find implementations')
-  .action(async (file: string, line: string, col: string) => {
+  .description('Find implementations. Use --symbol for auto-positioning.');
+implementationsCmd = addSymbolOptions(implementationsCmd);
+implementationsCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
     const opts = program.opts();
-    const filePath = resolveFilePath(file, opts.project);
     const projectPath = path.resolve(opts.project);
     
-    if (!fs.existsSync(filePath)) {
-      outputResult({ success: false, error: `File not found: ${filePath}`, elapsed: 0 });
+    // 解析位置（支持符号模式）
+    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    if ('success' in posResult) {
+      outputResult(posResult);
       return;
     }
+    
+    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
     
     await executeCommand(
       '/implementations',
       {
         project: projectPath,
         file: filePath,
-        line,
-        col,
+        line: resolvedLine,
+        col: resolvedCol,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
       async () => {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          const result = await client.getImplementations(filePath, parseInt(line), parseInt(col));
+          const result = await client.getImplementations(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
           return { implementations: result, count: result.length };
         } finally {
           if (client) await client.stop();
@@ -564,33 +737,37 @@ program
   });
 
 // hover
-program
-  .command('hover <file> <line> <col>')
-  .description('Get hover information')
-  .action(async (file: string, line: string, col: string) => {
+let hoverCmd = program
+  .command('hover <file> [line] [col]')
+  .description('Get hover information. Use --symbol for auto-positioning.');
+hoverCmd = addSymbolOptions(hoverCmd);
+hoverCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
     const opts = program.opts();
-    const filePath = resolveFilePath(file, opts.project);
     const projectPath = path.resolve(opts.project);
     
-    if (!fs.existsSync(filePath)) {
-      outputResult({ success: false, error: `File not found: ${filePath}`, elapsed: 0 });
+    // 解析位置（支持符号模式）
+    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    if ('success' in posResult) {
+      outputResult(posResult);
       return;
     }
+    
+    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
     
     await executeCommand(
       '/hover',
       {
         project: projectPath,
         file: filePath,
-        line,
-        col,
+        line: resolvedLine,
+        col: resolvedCol,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
       async () => {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          return await client.getHover(filePath, parseInt(line), parseInt(col));
+          return await client.getHover(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
         } finally {
           if (client) await client.stop();
         }
