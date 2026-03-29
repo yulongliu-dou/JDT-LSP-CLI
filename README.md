@@ -4,10 +4,11 @@
 
 ## 版本更新日志
 
-### v1.6.5 (2026-03-29)
+### v1.6.6 (2026-03-29)
 - **BUG修复**: 修复 `type-definition`/`typedef` 命令 `--json-compact` 模式返回空对象的问题
   - 添加 `typeDefinition` 和 `typedef` 到 `arrayFieldMap` 映射
   - 现在正确识别 `{ locations: [...], count: N }` 包装结构
+- **文档更新**: 补充 `type-definition` 接口方法限制和 `--json-compact` 符号层级结构说明
 
 ### v1.6.4 (2026-03-29)
 - **BUG修复**: 修复 `--json-compact` 模式下包装对象数据结构处理错误
