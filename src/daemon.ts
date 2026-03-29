@@ -4,15 +4,18 @@
  * 
  * 保持 JDT LS 常驻运行，通过 HTTP 接口接收请求
  * 避免每次命令都冷启动 JDT LS
+ * 
+ * 支持多项目模式（通过配置启用）
  */
 
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { JdtLsClient } from './jdtClient';
+import { JdtLsClient, loadConfig } from './jdtClient';
 import { CLIOptions, CLIResult, SymbolInfo } from './types';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode } from './symbolResolver';
+import { ProjectPool } from './projectPool';
 
 // 守护进程配置
 const DEFAULT_PORT = 9876;
@@ -20,6 +23,8 @@ const PID_FILE = path.join(os.homedir(), '.jdt-lsp-cli', 'daemon.pid');
 const LOG_FILE = path.join(os.homedir(), '.jdt-lsp-cli', 'daemon.log');
 
 // 全局状态
+let projectPool: ProjectPool | null = null;
+// 兼容单项目模式
 let client: JdtLsClient | null = null;
 let isReady = false;
 let currentProject: string | null = null;
@@ -42,13 +47,19 @@ function log(message: string, ...args: any[]) {
 }
 
 /**
- * 初始化 JDT LS 客户端
+ * 初始化 JDT LS 客户端（支持多项目模式）
  */
-async function initClient(projectPath: string, options: Partial<CLIOptions> = {}): Promise<void> {
+async function initClient(projectPath: string, options: Partial<CLIOptions> = {}): Promise<JdtLsClient> {
+  // 多项目模式：使用 ProjectPool
+  if (projectPool) {
+    return await projectPool.getClient(projectPath, options);
+  }
+  
+  // 单项目模式（向后兼容）
   // 如果项目路径相同且已初始化，复用现有客户端
   if (client && isReady && currentProject === projectPath) {
     log('Reusing existing client for project:', projectPath);
-    return;
+    return client;
   }
   
   // 如果项目路径不同，先关闭旧客户端
@@ -86,6 +97,8 @@ async function initClient(projectPath: string, options: Partial<CLIOptions> = {}
       throw error;
     }
   }
+  
+  return client;
 }
 
 /**
@@ -237,9 +250,9 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     }
     
     // 初始化客户端（如果需要）
-    await initClient(project, options);
+    const activeClient = await initClient(project, options);
     
-    if (!client || !isReady) {
+    if (!activeClient) {
       sendResponse(res, {
         success: false,
         error: 'JDT LS client not ready',
@@ -257,12 +270,12 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           throw new Error('Missing parameter: file');
         }
         // 解析位置（支持符号模式）
-        const posResult = await resolvePosition(body, client);
+        const posResult = await resolvePosition(body, activeClient);
         if ('success' in posResult) {
           sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
           return;
         }
-        result = await client.getDefinition(file, posResult.line, posResult.col);
+        result = await activeClient.getDefinition(file, posResult.line, posResult.col);
         break;
       }
         
@@ -271,13 +284,13 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           throw new Error('Missing parameter: file');
         }
         // 解析位置（支持符号模式）
-        const posResult = await resolvePosition(body, client);
+        const posResult = await resolvePosition(body, activeClient);
         if ('success' in posResult) {
           sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
           return;
         }
         const includeDecl = body.includeDeclaration !== false;
-        const refs = await client.getReferences(file, posResult.line, posResult.col, includeDecl);
+        const refs = await activeClient.getReferences(file, posResult.line, posResult.col, includeDecl);
         result = { references: refs, count: refs.length };
         break;
       }
@@ -286,7 +299,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         if (!file) {
           throw new Error('Missing parameter: file');
         }
-        let symbols = await client.getDocumentSymbols(file);
+        let symbols = await activeClient.getDocumentSymbols(file);
         if (body.flat) {
           const flatList: any[] = [];
           function flatten(syms: any[], parent?: string) {
@@ -306,12 +319,12 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           throw new Error('Missing parameter: file');
         }
         // 解析位置（支持符号模式）
-        const posResult = await resolvePosition(body, client);
+        const posResult = await resolvePosition(body, activeClient);
         if ('success' in posResult) {
           sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
           return;
         }
-        const impls = await client.getImplementations(file, posResult.line, posResult.col);
+        const impls = await activeClient.getImplementations(file, posResult.line, posResult.col);
         result = { implementations: impls, count: impls.length };
         break;
       }
@@ -321,12 +334,12 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           throw new Error('Missing parameter: file');
         }
         // 解析位置（支持符号模式）
-        const posResult = await resolvePosition(body, client);
+        const posResult = await resolvePosition(body, activeClient);
         if ('success' in posResult) {
           sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
           return;
         }
-        result = await client.getHover(file, posResult.line, posResult.col);
+        result = await activeClient.getHover(file, posResult.line, posResult.col);
         break;
       }
         
@@ -335,7 +348,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           throw new Error('Missing parameter: file');
         }
         // 解析位置（支持符号模式）
-        const posResult = await resolvePosition(body, client);
+        const posResult = await resolvePosition(body, activeClient);
         if ('success' in posResult) {
           sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
           return;
@@ -344,7 +357,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         const maxDepth = body.depth || 5;
         const incoming = body.incoming || false;
         
-        const items = await client.prepareCallHierarchy(file, posLine, posCol);
+        const items = await activeClient.prepareCallHierarchy(file, posLine, posCol);
         if (!items || items.length === 0) {
           result = { entry: null, calls: [], totalMethods: 0 };
         } else {
@@ -357,8 +370,8 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
             visited.add(key);
             
             const calls = incoming
-              ? await client!.getIncomingCalls(item)
-              : await client!.getOutgoingCalls(item);
+              ? await activeClient.getIncomingCalls(item)
+              : await activeClient.getOutgoingCalls(item);
             
             for (const call of calls) {
               const target = incoming ? call.from : call.to;
@@ -381,6 +394,73 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
             calls: allCalls,
             totalMethods: visited.size,
           };
+        }
+        break;
+      }
+      
+      case '/workspace-symbols':
+      case '/find': {
+        const query = body.query || '';
+        const limit = body.limit ? parseInt(body.limit) : undefined;
+        const symbols = await activeClient.getWorkspaceSymbols(query, limit);
+        
+        // 可选：按 kind 过滤
+        let filtered = symbols;
+        if (body.kind) {
+          const kindFilter = body.kind.toLowerCase();
+          filtered = symbols.filter((s: any) => 
+            s.kind.toLowerCase() === kindFilter
+          );
+        }
+        
+        result = { symbols: filtered, count: filtered.length };
+        break;
+      }
+      
+      case '/type-definition':
+      case '/typedef': {
+        if (!file) {
+          throw new Error('Missing parameter: file');
+        }
+        // 解析位置（支持符号模式）
+        const posResult = await resolvePosition(body, activeClient);
+        if ('success' in posResult) {
+          sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
+          return;
+        }
+        result = await activeClient.getTypeDefinition(file, posResult.line, posResult.col);
+        break;
+      }
+      
+      case '/projects': {
+        // 列出所有活跃项目
+        const projects = projectPool ? projectPool.listProjects() : (currentProject ? [{
+          path: currentProject,
+          status: isReady ? 'ready' : 'initializing',
+          lastAccess: Date.now(),
+          priority: 0,
+        }] : []);
+        result = { projects, count: projects.length };
+        break;
+      }
+      
+      case '/release': {
+        // 释放指定项目
+        const targetProject = body.releaseProject || project;
+        if (projectPool) {
+          const released = await projectPool.releaseProject(targetProject);
+          result = { released, project: targetProject };
+        } else {
+          // 单项目模式：如果是当前项目则释放
+          if (currentProject === targetProject && client) {
+            await client.stop();
+            client = null;
+            isReady = false;
+            currentProject = null;
+            result = { released: true, project: targetProject };
+          } else {
+            result = { released: false, project: targetProject, reason: 'Project not loaded' };
+          }
         }
         break;
       }
@@ -413,7 +493,10 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 /**
  * 启动守护进程
  */
-export function startDaemon(port: number = DEFAULT_PORT): void {
+export function startDaemon(port: number = DEFAULT_PORT, options?: { eagerInit?: boolean; projectPath?: string; jdtlsPath?: string; multiProject?: boolean }): void {
+  // 加载配置
+  const config = loadConfig();
+  
   // 确保目录存在
   const pidDir = path.dirname(PID_FILE);
   if (!fs.existsSync(pidDir)) {
@@ -433,10 +516,18 @@ export function startDaemon(port: number = DEFAULT_PORT): void {
     }
   }
   
+  // 初始化项目池（如果启用多项目模式）
+  const maxProjects = config.daemon?.maxProjects || 1;
+  if (maxProjects > 1 || options?.multiProject) {
+    log('Multi-project mode enabled, max projects:', maxProjects);
+    console.log(`Multi-project mode enabled (max ${maxProjects} projects)`);
+    projectPool = new ProjectPool(config, log);
+  }
+  
   // 创建 HTTP 服务器
   const server = http.createServer(handleRequest);
   
-  server.listen(port, '127.0.0.1', () => {
+  server.listen(port, '127.0.0.1', async () => {
     log(`JDT LSP Daemon started on http://127.0.0.1:${port}`);
     log(`PID: ${process.pid}`);
     log(`Log file: ${LOG_FILE}`);
@@ -447,12 +538,29 @@ export function startDaemon(port: number = DEFAULT_PORT): void {
     console.log(`JDT LSP Daemon started on port ${port}`);
     console.log(`PID file: ${PID_FILE}`);
     console.log(`Log file: ${LOG_FILE}`);
+    
+    // 预初始化项目（如果启用）
+    if (options?.eagerInit && options?.projectPath) {
+      log('Eager initialization enabled, pre-warming project:', options.projectPath);
+      console.log('Pre-initializing project:', options.projectPath);
+      try {
+        await initClient(options.projectPath, { jdtlsPath: options.jdtlsPath });
+        log('Project pre-initialized successfully');
+        console.log('Project ready!');
+      } catch (error: any) {
+        log('Eager initialization failed:', error.message);
+        console.error('Warning: Eager initialization failed:', error.message);
+        console.error('Project will be initialized on first request.');
+      }
+    }
   });
   
   // 优雅关闭
   process.on('SIGINT', async () => {
     log('Received SIGINT, shutting down...');
-    if (client) {
+    if (projectPool) {
+      await projectPool.shutdown();
+    } else if (client) {
       await client.stop();
     }
     if (fs.existsSync(PID_FILE)) {
@@ -463,7 +571,9 @@ export function startDaemon(port: number = DEFAULT_PORT): void {
   
   process.on('SIGTERM', async () => {
     log('Received SIGTERM, shutting down...');
-    if (client) {
+    if (projectPool) {
+      await projectPool.shutdown();
+    } else if (client) {
       await client.stop();
     }
     if (fs.existsSync(PID_FILE)) {

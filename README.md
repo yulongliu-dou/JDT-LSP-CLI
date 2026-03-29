@@ -41,8 +41,17 @@ jls --version
 # 启动守护进程（首次启动需要 30-60 秒初始化）
 jls daemon start
 
+# 预初始化模式（v1.4.0+）- 启动时立即初始化指定项目
+jls daemon start --eager --project /path/to/java-project
+
 # 检查状态
 jls daemon status
+
+# 列出已加载项目（v1.4.0+）
+jls daemon list
+
+# 释放指定项目（v1.4.0+）
+jls daemon release /path/to/project
 
 # 停止守护进程
 jls daemon stop
@@ -126,7 +135,9 @@ jls config defaults
   },
   "daemon": {
     "port": 9876,                     // 守护进程端口
-    "idleTimeoutMinutes": 30          // 空闲超时（分钟，0=不超时）
+    "idleTimeoutMinutes": 30,         // 空闲超时（分钟，0=不超时）
+    "maxProjects": 1,                 // 最大同时活跃项目数（v1.4.0+）
+    "perProjectMemory": "1g"          // 每项目内存限制（v1.4.0+）
   }
 }
 ```
@@ -194,10 +205,20 @@ jls daemon start
 | `symbols` | `sym` | 获取文件符号列表 |
 | `implementations` | `impl` | 查找接口/抽象方法实现 |
 | `hover` | - | 获取悬停信息（类型、文档） |
+| `find` | - | 全局符号搜索（v1.4.0+） |
+| `type-definition` | `typedef` | 跳转到类型定义（v1.4.0+） |
 
 ## 符号定位功能（v1.3.0+）
 
 所有位置敏感命令（除 `symbols` 外）现在支持 **基于符号名称自动定位**，无需手动指定行列位置。这对 AI Agent 特别有用，可以直接通过符号名称调用 LSP 功能。
+
+### v1.4.0 增强
+
+- **模糊匹配**：`--method` 和 `--symbol` 支持模糊匹配，无需完整签名
+  - 仅有一个同名方法时，忽略签名要求直接返回
+  - 泛型类型自动规范化：`List<String>` 可用 `List` 匹配
+- **全局定位**：新增 `--global` 选项，无需指定文件路径
+- **智能位置**：`hover` 命令使用符号中间位置，提高命中率
 
 ### 符号定位选项
 
@@ -285,6 +306,7 @@ jls [command] [options]
   -v, --verbose           显示详细日志
   --timeout <ms>          操作超时时间 (默认: 60000)
   --no-daemon             禁用守护进程模式，每次命令重新启动 JDT LS
+  --json-compact          紧凑 JSON 输出，仅返回核心字段（v1.4.0+）
   -V, --version           显示版本号
   -h, --help              显示帮助信息
 ```
@@ -564,6 +586,93 @@ jls hover src/main/java/com/example/Outer.java --container "Outer.Inner" --metho
 }
 ```
 
+### 7. find - 全局符号搜索（v1.4.0+）
+
+在整个工作区中搜索符号，无需指定文件路径。
+
+```bash
+jls find <query> [options]
+
+选项:
+  --kind <type>     按符号类型过滤 (Class, Method, Field...)
+  --limit <n>       返回结果数量限制 (默认: 50)
+```
+
+**示例：**
+```bash
+# 搜索所有包含 "User" 的符号
+jls find User
+
+# 只搜索类
+jls find Service --kind Class
+
+# 限制返回数量
+jls find Config --limit 10
+```
+
+**输出示例：**
+```json
+{
+  "success": true,
+  "data": {
+    "symbols": [
+      {
+        "name": "UserService",
+        "kind": "Class",
+        "containerName": "com.example.service",
+        "location": {
+          "uri": "file:///project/src/UserService.java",
+          "range": { "start": { "line": 5, "character": 0 } }
+        }
+      }
+    ],
+    "count": 15
+  },
+  "elapsed": 500
+}
+```
+
+### 8. type-definition (typedef) - 类型跳转（v1.4.0+）
+
+跳转到变量或表达式的类型定义。
+
+```bash
+jls typedef <file> [line] [col] [options]
+
+选项:
+  --method <name>       通过方法名自动定位
+  --symbol <name>       通过符号名自动定位
+  --container <path>    父容器路径
+  --signature <sig>     方法签名（区分重载）
+  --index <n>           同名符号索引
+```
+
+**示例：**
+```bash
+# 传统方式：指定行列
+jls typedef src/main/java/com/example/App.java 30 15
+
+# 符号定位：跳转到字段的类型定义
+jls typedef src/main/java/com/example/App.java --symbol userService
+```
+
+**输出示例：**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "uri": "file:///project/src/UserService.java",
+      "range": {
+        "start": { "line": 5, "character": 0 },
+        "end": { "line": 50, "character": 1 }
+      }
+    }
+  ],
+  "elapsed": 300
+}
+```
+
 ## 位置参数说明
 
 **传统方式（行列定位）：**
@@ -578,8 +687,66 @@ jls hover src/main/java/com/example/Outer.java --container "Outer.Inner" --metho
 - `--signature <sig>`: 方法签名（用于区分重载方法）
 - `--index <n>`: 同名符号索引（0-based）
 - `--kind <type>`: 符号类型（Method, Field, Class, Interface...）
+- `--global`: 全局定位，无需指定文件路径（v1.4.0+）
 
 **提示：** 使用符号定位方式时，无需指定行列参数，工具会自动解析符号位置。
+
+### 全局定位（v1.4.0+）
+
+使用 `--global` 选项可在不知道文件路径的情况下定位方法：
+
+```bash
+# 全局搜索方法并获取定义
+jls def --global --method processOrder
+
+# 全局搜索方法的引用
+jls refs --global --method UserService.findById
+
+# 全局搜索方法的调用链
+jls ch --global --method execute
+```
+
+**工作原理：**
+1. 使用 `workspace/symbol` 搜索方法或包含该方法的类
+2. 获取文件路径后，使用 `documentSymbol` 精确定位方法位置
+3. 执行相应的 LSP 操作（定义、引用、调用链等）
+
+## 多项目支持（v1.4.0+）
+
+守护进程模式支持同时管理多个 Java 项目，通过配置 `maxProjects` 启用：
+
+### 配置多项目
+
+```json
+{
+  "daemon": {
+    "maxProjects": 3,           // 最大同时活跃项目数
+    "perProjectMemory": "1g"    // 每项目内存限制
+  }
+}
+```
+
+### 多项目命令
+
+```bash
+# 查看所有已加载项目
+jls daemon list
+
+# 查看守护进程状态（包含项目列表）
+jls daemon status
+
+# 手动释放指定项目
+jls daemon release /path/to/project
+
+# 停止守护进程（释放所有项目）
+jls daemon stop
+```
+
+### 项目管理策略
+
+- **LRU 淘汰**：当项目数达到 `maxProjects` 时，自动淘汰最久未使用的项目
+- **优先级保护**：可通过配置为重要项目设置高优先级，避免被淘汰
+- **自动初始化**：首次请求某项目时自动初始化
 
 ## 输出格式
 
@@ -638,6 +805,7 @@ jdt-lsp-cli
 │   ├── daemon.ts         # 守护进程 HTTP 服务
 │   ├── jdtClient.ts      # LSP 客户端核心 + JVM 配置
 │   ├── symbolResolver.ts # 符号解析器（符号名称 → 位置）
+│   ├── projectPool.ts    # 多项目管理器（v1.4.0+）
 │   ├── types.ts          # 类型定义
 │   └── index.ts          # 库导出
 └── dist/                 # 编译输出

@@ -25,9 +25,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
 import { JdtLsClient, loadConfig, generateConfigTemplate, CONFIG_FILE, DEFAULT_JVM_CONFIG } from './jdtClient';
-import { CLIResult, SymbolInfo } from './types';
+import { CLIResult, SymbolInfo, COMPACT_FIELDS } from './types';
 import { startDaemon, getDaemonStatus, stopDaemon, DAEMON_PORT } from './daemon';
-import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult } from './symbolResolver';
+import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult, CommandType } from './symbolResolver';
 
 const program = new Command();
 
@@ -35,19 +35,67 @@ const program = new Command();
 program
   .name('jls')
   .description('Java LSP CLI - Fast Java language features for AI agents (with daemon support)')
-  .version('1.3.0')
+  .version('1.4.0')
   .option('-p, --project <path>', 'Java project root directory', process.cwd())
   .option('--jdtls-path <path>', 'Path to eclipse.jdt.ls server')
   .option('--data-dir <path>', 'JDT LS data directory')
   .option('-v, --verbose', 'Enable verbose logging', false)
   .option('--timeout <ms>', 'Operation timeout in milliseconds', '60000')
-  .option('--no-daemon', 'Disable daemon mode, start JDT LS for each command (slower)');
+  .option('--no-daemon', 'Disable daemon mode, start JDT LS for each command (slower)')
+  .option('--json-compact', 'Output compact JSON (minimal fields)', false);
 
 /**
- * 输出 JSON 结果
+ * 紧凑化数据对象（只保留指定字段）
  */
-function outputResult<T>(result: CLIResult<T>): void {
-  console.log(JSON.stringify(result, null, 2));
+function compactData(data: any, command: string): any {
+  const fields = (COMPACT_FIELDS as any)[command];
+  if (!fields || !data) return data;
+  
+  // 处理数组
+  if (Array.isArray(data)) {
+    return data.map(item => compactItem(item, fields));
+  }
+  
+  // 处理对象
+  return compactItem(data, fields);
+}
+
+function compactItem(item: any, fields: string[]): any {
+  if (!item || typeof item !== 'object') return item;
+  
+  const result: any = {};
+  for (const field of fields) {
+    const value = getNestedValue(item, field);
+    if (value !== undefined) {
+      setNestedValue(result, field, value);
+    }
+  }
+  return result;
+}
+
+function getNestedValue(obj: any, path: string): any {
+  return path.split('.').reduce((curr, key) => curr?.[key], obj);
+}
+
+function setNestedValue(obj: any, path: string, value: any): void {
+  const keys = path.split('.');
+  let curr = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (!curr[keys[i]]) curr[keys[i]] = {};
+    curr = curr[keys[i]];
+  }
+  curr[keys[keys.length - 1]] = value;
+}
+
+/**
+ * 输出 JSON 结果（支持紧凑模式）
+ */
+function outputResult<T>(result: CLIResult<T>, command?: string, compact?: boolean): void {
+  let output = result;
+  if (compact && result.data && command) {
+    output = { ...result, data: compactData(result.data, command) as T };
+  }
+  console.log(JSON.stringify(output, compact ? null : null, compact ? 0 : 2));
   process.exit(result.success ? 0 : 1);
 }
 
@@ -146,7 +194,130 @@ async function resolvePositionBySymbol(
 }
 
 /**
- * 检查是否使用符号模式，并解析位置
+ * 通过 workspace/symbol 全局解析方法位置
+ */
+async function resolveGlobalPosition(
+  methodName: string,
+  projectPath: string,
+  cmdOptions: any,
+  opts: any
+): Promise<{ filePath: string; line: string; col: string } | CLIResult<any>> {
+  // Step 1: 使用 workspace/symbol 搜索方法
+  let symbols: any[];
+  
+  if (opts.daemon !== false) {
+    const result = await sendDaemonRequest('/workspace-symbols', {
+      project: projectPath,
+      query: methodName,
+      kind: cmdOptions.kind || 'Method',
+      limit: 20,
+      options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
+    });
+    
+    if (!result.success) {
+      // 回退到直接模式
+      let client: JdtLsClient | null = null;
+      try {
+        client = await createDirectClient(opts);
+        symbols = await client.getWorkspaceSymbols(methodName, 20);
+      } catch (error: any) {
+        return {
+          success: false,
+          error: `Failed to search workspace symbols: ${error.message}`,
+          elapsed: 0,
+        };
+      } finally {
+        if (client) await client.stop();
+      }
+    } else {
+      symbols = result.data?.symbols || [];
+    }
+  } else {
+    let client: JdtLsClient | null = null;
+    try {
+      client = await createDirectClient(opts);
+      symbols = await client.getWorkspaceSymbols(methodName, 20);
+    } catch (error: any) {
+      return {
+        success: false,
+        error: `Failed to search workspace symbols: ${error.message}`,
+        elapsed: 0,
+      };
+    } finally {
+      if (client) await client.stop();
+    }
+  }
+  
+  // 过滤符号类型（如果指定）
+  const kindFilter = (cmdOptions.kind || 'Method').toLowerCase();
+  let filtered = symbols.filter((s: any) => 
+    s.kind?.toLowerCase() === kindFilter && 
+    s.name?.toLowerCase().includes(methodName.toLowerCase())
+  );
+  
+  // 优先精确匹配
+  const exactMatch = filtered.find((s: any) => s.name === methodName);
+  if (exactMatch) {
+    filtered = [exactMatch, ...filtered.filter((s: any) => s !== exactMatch)];
+  }
+  
+  if (filtered.length === 0) {
+    return {
+      success: false,
+      error: `No ${kindFilter} named '${methodName}' found in workspace`,
+      data: {
+        suggestions: symbols.slice(0, 10).map((s: any) => `${s.name} [${s.kind}] in ${s.containerName || 'unknown'}`)
+      },
+      elapsed: 0,
+    };
+  }
+  
+  // 如果有多个匹配且未指定索引，返回歧义
+  if (filtered.length > 1 && cmdOptions.index === undefined) {
+    return {
+      success: false,
+      error: `Found ${filtered.length} matches for '${methodName}'. Use --index to select.`,
+      data: {
+        candidates: filtered.map((s: any, idx: number) => ({
+          index: idx,
+          name: s.name,
+          kind: s.kind,
+          container: s.containerName,
+          file: s.location?.uri?.replace('file://', ''),
+          line: (s.location?.range?.start?.line || 0) + 1,
+        }))
+      },
+      elapsed: 0,
+    };
+  }
+  
+  // 选择符号
+  const selectedIdx = cmdOptions.index !== undefined ? parseInt(cmdOptions.index) : 0;
+  const selected = filtered[selectedIdx];
+  
+  if (!selected) {
+    return {
+      success: false,
+      error: `Index ${selectedIdx} out of range. Found ${filtered.length} matches.`,
+      elapsed: 0,
+    };
+  }
+  
+  // 提取位置
+  const uri = selected.location?.uri || '';
+  const filePath = uri.replace('file://', '').replace(/^\/([A-Za-z]:)/, '$1'); // Windows 路径修复
+  const line = (selected.location?.range?.start?.line || 0) + 1;
+  const col = (selected.location?.range?.start?.character || 0) + 1;
+  
+  return {
+    filePath,
+    line: String(line),
+    col: String(col),
+  };
+}
+
+/**
+ * 检查是否使用符号模式，并解析位置（支持全局定位）
  */
 async function getPosition(
   file: string | undefined,
@@ -157,8 +328,21 @@ async function getPosition(
 ): Promise<{ filePath: string; line: string; col: string } | CLIResult<any>> {
   const projectPath = path.resolve(opts.project);
   
+  // 全局定位模式：不需要文件路径
+  if (cmdOptions.global && isSymbolMode(cmdOptions)) {
+    const methodName = cmdOptions.method || cmdOptions.symbol;
+    return await resolveGlobalPosition(methodName, projectPath, cmdOptions, opts);
+  }
+  
   // 检查文件参数
   if (!file) {
+    if (isSymbolMode(cmdOptions)) {
+      return {
+        success: false,
+        error: 'File path is required. Use --global for workspace-wide search without file path.',
+        elapsed: 0,
+      };
+    }
     return {
       success: false,
       error: 'File path is required',
@@ -283,9 +467,11 @@ async function executeCommand(
   endpoint: string,
   body: any,
   directHandler: () => Promise<any>,
-  opts: any
+  opts: any,
+  commandName?: string
 ): Promise<void> {
   const startTime = Date.now();
+  const compact = opts.jsonCompact;
   
   // 如果禁用了守护进程，使用直接模式
   if (opts.daemon === false) {
@@ -295,13 +481,13 @@ async function executeCommand(
         success: true,
         data: result,
         elapsed: Date.now() - startTime,
-      });
+      }, commandName, compact);
     } catch (error: any) {
       outputResult({
         success: false,
         error: error.message,
         elapsed: Date.now() - startTime,
-      });
+      }, commandName, compact);
     }
     return;
   }
@@ -310,7 +496,7 @@ async function executeCommand(
   const daemonResult = await sendDaemonRequest(endpoint, body);
   
   if (daemonResult.success || !daemonResult.error?.includes('Daemon not running')) {
-    outputResult(daemonResult);
+    outputResult(daemonResult, commandName, compact);
     return;
   }
   
@@ -327,13 +513,13 @@ async function executeCommand(
       success: true,
       data: result,
       elapsed: Date.now() - startTime,
-    });
+    }, commandName, compact);
   } catch (error: any) {
     outputResult({
       success: false,
       error: error.message,
       elapsed: Date.now() - startTime,
-    });
+    }, commandName, compact);
   }
 }
 
@@ -346,7 +532,10 @@ daemonCmd
   .command('start')
   .description('Start the daemon process')
   .option('--port <port>', 'Daemon port', String(DAEMON_PORT))
+  .option('--eager', 'Pre-initialize project immediately (eliminates lazy loading delay)')
+  .option('--init-project <path>', 'Project path to pre-initialize with --eager')
   .action((cmdOpts) => {
+    const opts = program.opts();
     const status = getDaemonStatus();
     if (status.running) {
       console.log(`Daemon already running with PID ${status.pid}`);
@@ -354,7 +543,15 @@ daemonCmd
     }
     
     console.log('Starting JDT LSP daemon...');
-    startDaemon(parseInt(cmdOpts.port));
+    
+    // 支持预初始化
+    const eagerOptions = cmdOpts.eager ? {
+      eagerInit: true,
+      projectPath: cmdOpts.initProject || opts.project,
+      jdtlsPath: opts.jdtlsPath,
+    } : undefined;
+    
+    startDaemon(parseInt(cmdOpts.port), eagerOptions);
   });
 
 daemonCmd
@@ -451,6 +648,64 @@ daemonCmd
     }
   });
 
+daemonCmd
+  .command('list')
+  .description('List all loaded projects (multi-project mode)')
+  .action(async () => {
+    const status = getDaemonStatus();
+    if (!status.running) {
+      console.log('Daemon is not running');
+      process.exit(1);
+    }
+    
+    try {
+      const result = await sendDaemonRequest('/projects', {});
+      if (result.success && result.data) {
+        const projects = result.data.projects || [];
+        if (projects.length === 0) {
+          console.log('No projects loaded');
+        } else {
+          console.log(`Loaded projects (${projects.length}):`);
+          for (const p of projects) {
+            const age = Math.floor((Date.now() - p.lastAccess) / 1000);
+            console.log(`  ${p.path}`);
+            console.log(`    Status: ${p.status}, Priority: ${p.priority}, Last access: ${age}s ago`);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to get project list');
+    }
+  });
+
+daemonCmd
+  .command('release [project]')
+  .description('Release a loaded project (free memory)')
+  .action(async (project: string | undefined) => {
+    const opts = program.opts();
+    const status = getDaemonStatus();
+    if (!status.running) {
+      console.log('Daemon is not running');
+      process.exit(1);
+    }
+    
+    const targetProject = project || opts.project;
+    
+    try {
+      const result = await sendDaemonRequest('/release', {
+        project: targetProject,
+        releaseProject: targetProject,
+      });
+      if (result.success && result.data?.released) {
+        console.log(`Project released: ${targetProject}`);
+      } else {
+        console.log(`Failed to release project: ${result.data?.reason || 'unknown'}`);
+      }
+    } catch (e) {
+      console.error('Failed to release project');
+    }
+  });
+
 // ========== LSP 命令 ==========
 
 // 符号定位通用选项
@@ -461,6 +716,7 @@ const symbolOptions = [
   { flags: '--signature <sig>', desc: 'Method signature for overloads, e.g., "(String, int)"' },
   { flags: '--index <n>', desc: 'Index for multiple matches (0-based)' },
   { flags: '--kind <type>', desc: 'Symbol kind: Method, Field, Class, Interface' },
+  { flags: '--global', desc: 'Search globally without file path (requires --method or --symbol)' },
 ];
 
 /**
@@ -554,7 +810,8 @@ callHierarchyCmd.action(async (file: string, line: string | undefined, col: stri
           if (client) await client.stop();
         }
       },
-      opts
+      opts,
+      'callHierarchy'
     );
   });
 
@@ -595,7 +852,8 @@ definitionCmd.action(async (file: string, line: string | undefined, col: string 
           if (client) await client.stop();
         }
       },
-      opts
+      opts,
+      'definition'
     );
   });
 
@@ -639,7 +897,8 @@ referencesCmd.action(async (file: string, line: string | undefined, col: string 
           if (client) await client.stop();
         }
       },
-      opts
+      opts,
+      'references'
     );
   });
 
@@ -690,7 +949,94 @@ program
           if (client) await client.stop();
         }
       },
-      opts
+      opts,
+      'symbols'
+    );
+  });
+
+// find (workspace/symbol)
+program
+  .command('find <query>')
+  .alias('f')
+  .description('Search symbols across the entire workspace')
+  .option('--kind <type>', 'Filter by symbol kind: Class, Method, Field, Interface...')
+  .option('--limit <n>', 'Maximum number of results', '50')
+  .action(async (query: string, cmdOptions: any) => {
+    const opts = program.opts();
+    const projectPath = path.resolve(opts.project);
+    
+    await executeCommand(
+      '/workspace-symbols',
+      {
+        project: projectPath,
+        query,
+        kind: cmdOptions.kind,
+        limit: cmdOptions.limit,
+        options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
+      },
+      async () => {
+        let client: JdtLsClient | null = null;
+        try {
+          client = await createDirectClient(opts);
+          let symbols = await client.getWorkspaceSymbols(query, parseInt(cmdOptions.limit));
+          
+          // 按 kind 过滤
+          if (cmdOptions.kind) {
+            const kindFilter = cmdOptions.kind.toLowerCase();
+            symbols = symbols.filter((s: any) => 
+              s.kind.toLowerCase() === kindFilter
+            );
+          }
+          
+          return { symbols, count: symbols.length };
+        } finally {
+          if (client) await client.stop();
+        }
+      },
+      opts,
+      'workspaceSymbols'
+    );
+  });
+
+// type-definition
+let typeDefCmd = program
+  .command('type-definition <file> [line] [col]')
+  .alias('typedef')
+  .description('Go to type definition (e.g., variable type -> class). Use --symbol for auto-positioning.');
+typeDefCmd = addSymbolOptions(typeDefCmd);
+typeDefCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
+    const opts = program.opts();
+    const projectPath = path.resolve(opts.project);
+    
+    // 解析位置（支持符号模式）
+    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    if ('success' in posResult) {
+      outputResult(posResult);
+      return;
+    }
+    
+    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
+    
+    await executeCommand(
+      '/type-definition',
+      {
+        project: projectPath,
+        file: filePath,
+        line: resolvedLine,
+        col: resolvedCol,
+        options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
+      },
+      async () => {
+        let client: JdtLsClient | null = null;
+        try {
+          client = await createDirectClient(opts);
+          return await client.getTypeDefinition(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
+        } finally {
+          if (client) await client.stop();
+        }
+      },
+      opts,
+      'typeDefinition'
     );
   });
 
@@ -732,7 +1078,8 @@ implementationsCmd.action(async (file: string, line: string | undefined, col: st
           if (client) await client.stop();
         }
       },
-      opts
+      opts,
+      'implementations'
     );
   });
 
@@ -772,7 +1119,8 @@ hoverCmd.action(async (file: string, line: string | undefined, col: string | und
           if (client) await client.stop();
         }
       },
-      opts
+      opts,
+      'hover'
     );
   });
 

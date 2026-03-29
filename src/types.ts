@@ -94,6 +94,16 @@ export interface DocumentSymbol {
   children?: DocumentSymbol[];
 }
 
+/**
+ * 工作区符号（workspace/symbol 返回）
+ */
+export interface WorkspaceSymbol {
+  name: string;
+  kind: number | string;
+  containerName?: string;
+  location: Location;
+}
+
 export interface CLIOptions {
   jdtlsPath?: string;       // Path to eclipse.jdt.ls
   projectPath: string;      // Java project root
@@ -121,6 +131,16 @@ export interface JvmConfig {
 export interface DaemonConfigOptions {
   port: number;              // HTTP 服务端口
   idleTimeoutMinutes: number; // 空闲超时（分钟），0 表示不超时
+  maxProjects: number;       // 最大同时活跃项目数（默认 1）
+  perProjectMemory: string;  // 每项目内存限制（如 "1g"）
+}
+
+/**
+ * 项目配置（可选，用于优先级等）
+ */
+export interface ProjectConfig {
+  priority: number;          // 优先级（越高越不容易被淘汰，默认 0）
+  jvmConfig?: Partial<JvmConfig>;  // 项目特定的 JVM 配置
 }
 
 /**
@@ -129,6 +149,7 @@ export interface DaemonConfigOptions {
 export interface DaemonConfig {
   jvm: JvmConfig;
   daemon: DaemonConfigOptions;
+  projects?: Record<string, ProjectConfig>;  // 项目路径 -> 配置
 }
 
 export interface CLIResult<T> {
@@ -137,6 +158,36 @@ export interface CLIResult<T> {
   error?: string;
   elapsed?: number;
 }
+
+// ========== 紧凑输出配置 ==========
+
+/**
+ * 紧凑输出字段配置
+ */
+export interface CompactFieldConfig {
+  definition: string[];
+  references: string[];
+  symbols: string[];
+  callHierarchy: string[];
+  hover: string[];
+  implementations: string[];
+  typeDefinition: string[];
+  workspaceSymbols: string[];
+}
+
+/**
+ * 默认紧凑输出字段（每个命令只保留核心字段）
+ */
+export const COMPACT_FIELDS: CompactFieldConfig = {
+  definition: ['uri', 'range.start.line', 'range.start.character'],
+  references: ['uri', 'range.start.line'],
+  symbols: ['name', 'kind', 'range.start.line'],
+  callHierarchy: ['entry', 'calls', 'totalMethods'],
+  hover: ['contents'],
+  implementations: ['uri', 'range.start.line'],
+  typeDefinition: ['uri', 'range.start.line'],
+  workspaceSymbols: ['name', 'kind', 'location.uri', 'location.range.start.line'],
+};
 
 // Symbol kinds mapping
 export const SymbolKindMap: Record<number, string> = {

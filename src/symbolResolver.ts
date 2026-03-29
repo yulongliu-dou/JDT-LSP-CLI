@@ -3,9 +3,11 @@
  * 
  * 支持:
  * - 基于符号名称定位（无重载场景）
- * - 基于签名区分重载方法
+ * - 基于签名区分重载方法（支持模糊匹配）
  * - 基于容器路径定位嵌套符号（匿名类/Lambda）
  * - 基于索引定位多个同名符号
+ * - 泛型类型模糊匹配
+ * - 智能位置选择（针对不同命令优化）
  */
 
 import { SymbolQuery, ResolvedPosition, SymbolResolutionError, SymbolInfo } from './types';
@@ -18,6 +20,11 @@ export type SymbolResolveResult =
   | { success: false; error: SymbolResolutionError };
 
 /**
+ * 命令类型（用于智能位置选择）
+ */
+export type CommandType = 'hover' | 'definition' | 'references' | 'implementations' | 'call-hierarchy';
+
+/**
  * 从符号的 detail 字段提取参数签名
  * JDT LS 返回的 detail 格式: "methodName(String orderId, int quantity) : void"
  */
@@ -28,10 +35,42 @@ export function extractSignature(detail: string | undefined): string {
 }
 
 /**
- * 规范化签名字符串（移除空格、参数名，只保留类型）
- * 例: "String orderId, int quantity" -> "String,int"
+ * 提取简化的签名（用于用户友好的显示）
+ * 例: "String orderId, int quantity" -> "(String, int)"
  */
-export function normalizeSignature(signature: string): string {
+export function extractSimpleSignature(detail: string | undefined): string {
+  const sig = extractSignature(detail);
+  if (!sig) return '()';
+  
+  const types = sig
+    .split(',')
+    .map(param => {
+      const trimmed = param.trim();
+      const parts = trimmed.split(/\s+/);
+      return normalizeGenericType(parts[0] || '');
+    })
+    .filter(Boolean);
+  
+  return `(${types.join(', ')})`;
+}
+
+/**
+ * 规范化泛型类型（移除泛型参数）
+ * 例: "List<String>" -> "List", "Map<String, Integer>" -> "Map"
+ */
+export function normalizeGenericType(typeName: string): string {
+  if (!typeName) return '';
+  // 移除泛型参数: List<String> -> List
+  // 处理嵌套泛型: List<Map<String, Integer>> -> List
+  return typeName.replace(/<[^<>]*>/g, '').replace(/<.*$/g, '').trim();
+}
+
+/**
+ * 规范化签名字符串（移除空格、参数名，只保留类型）
+ * 例: "String orderId, int quantity" -> "string,int"
+ * 支持泛型模糊匹配: "List<String>" -> "list"
+ */
+export function normalizeSignature(signature: string, stripGenerics: boolean = true): string {
   if (!signature) return '';
   
   return signature
@@ -40,8 +79,12 @@ export function normalizeSignature(signature: string): string {
       const trimmed = param.trim();
       // 提取类型名（处理泛型和数组）
       const parts = trimmed.split(/\s+/);
-      // 返回第一个部分（类型），忽略参数名
-      return parts[0] || '';
+      let typeName = parts[0] || '';
+      // 可选：移除泛型参数
+      if (stripGenerics) {
+        typeName = normalizeGenericType(typeName);
+      }
+      return typeName;
     })
     .filter(Boolean)
     .join(',')
@@ -49,19 +92,78 @@ export function normalizeSignature(signature: string): string {
 }
 
 /**
- * 检查符号签名是否匹配查询
+ * 检查符号签名是否匹配查询（支持模糊匹配）
  */
 export function matchSignature(symbolDetail: string | undefined, querySignature: string): boolean {
-  const symbolSig = normalizeSignature(extractSignature(symbolDetail));
-  const querySig = normalizeSignature(querySignature);
+  // 精确签名匹配（保留泛型）
+  const symbolSigFull = normalizeSignature(extractSignature(symbolDetail), false);
+  const querySigFull = normalizeSignature(querySignature, false);
+  if (symbolSigFull === querySigFull) return true;
   
-  // 精确匹配
+  // 模糊签名匹配（移除泛型）
+  const symbolSig = normalizeSignature(extractSignature(symbolDetail), true);
+  const querySig = normalizeSignature(querySignature, true);
   if (symbolSig === querySig) return true;
   
   // 部分匹配（查询签名是符号签名的子串）
   if (symbolSig.includes(querySig) || querySig.includes(symbolSig)) return true;
   
   return false;
+}
+
+/**
+ * 模糊匹配符号名称（支持泛型类名）
+ * 例: "List" 匹配 "List<String>", "UserService" 匹配 "UserService"
+ */
+export function fuzzyMatchName(symbolName: string, queryName: string): boolean {
+  if (!symbolName || !queryName) return false;
+  
+  // 精确匹配
+  if (symbolName === queryName) return true;
+  
+  // 泛型模糊匹配：移除泛型后比较
+  const normalizedSymbol = normalizeGenericType(symbolName);
+  const normalizedQuery = normalizeGenericType(queryName);
+  if (normalizedSymbol === normalizedQuery) return true;
+  
+  // 前缀匹配（用于部分输入）
+  if (normalizedSymbol.startsWith(normalizedQuery) || normalizedQuery.startsWith(normalizedSymbol)) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * 获取最优位置（根据命令类型智能选择）
+ * - hover: 使用 selectionRange 中间位置（避免边界问题）
+ * - 其他: 使用 selectionRange 起始位置
+ */
+export function getOptimalPosition(
+  symbol: SymbolInfo, 
+  command: CommandType = 'definition'
+): { line: number; character: number } {
+  const selectionRange = symbol.selectionRange || symbol.range;
+  
+  if (command === 'hover') {
+    // hover 命令使用中间位置，提高 JDT LS 返回完整信息的命中率
+    const startChar = selectionRange.start.character;
+    const endChar = selectionRange.end.character;
+    // 如果是同一行，取中间字符位置
+    if (selectionRange.start.line === selectionRange.end.line) {
+      const midChar = Math.floor((startChar + endChar) / 2);
+      return {
+        line: selectionRange.start.line + 1,  // 转换为 1-based
+        character: midChar + 1,
+      };
+    }
+  }
+  
+  // 其他命令使用起始位置
+  return {
+    line: selectionRange.start.line + 1,      // 转换为 1-based
+    character: selectionRange.start.character + 1,
+  };
 }
 
 /**
@@ -122,7 +224,7 @@ function findContainer(
 }
 
 /**
- * 在符号列表中查找匹配的符号
+ * 在符号列表中查找匹配的符号（支持模糊匹配）
  */
 function findMatchingSymbols(
   symbols: SymbolInfo[],
@@ -148,13 +250,13 @@ function findMatchingSymbols(
   
   // 过滤匹配的符号
   return allSymbols.filter(({ symbol }) => {
-    // 名称匹配
-    if (symbol.name !== query.name) return false;
+    // 名称匹配（支持模糊匹配）
+    if (!fuzzyMatchName(symbol.name, query.name)) return false;
     
     // 类型匹配（如果指定）
     if (query.kind && symbol.kind !== query.kind) return false;
     
-    // 签名匹配（如果指定）
+    // 签名匹配（如果指定）- 已支持模糊匹配
     if (query.signature && !matchSignature(symbol.detail, query.signature)) {
       return false;
     }
@@ -167,8 +269,13 @@ function findMatchingSymbols(
  * 生成符号描述（用于错误提示）
  */
 function formatSymbolDescription(symbol: SymbolInfo, path: string): string {
-  const detail = symbol.detail ? ` - ${symbol.detail}` : '';
-  return `${path} [${symbol.kind}]${detail}`;
+  const signature = extractSimpleSignature(symbol.detail);
+  const kindStr = symbol.kind ? ` [${symbol.kind}]` : '';
+  // 对于方法，显示简化签名
+  if (symbol.kind === 'Method' || symbol.kind === 'Constructor') {
+    return `${path}${signature}${kindStr}`;
+  }
+  return `${path}${kindStr}`;
 }
 
 /**
@@ -204,11 +311,13 @@ function findSimilarNames(
  * 
  * @param symbols - documentSymbol 返回的符号树
  * @param query - 符号查询参数
+ * @param command - 命令类型（用于智能位置选择）
  * @returns 解析结果（成功返回位置，失败返回错误信息）
  */
 export function resolveSymbol(
   symbols: SymbolInfo[],
-  query: SymbolQuery
+  query: SymbolQuery,
+  command: CommandType = 'definition'
 ): SymbolResolveResult {
   // 验证查询参数
   if (!query.name || query.name.trim() === '') {
@@ -244,63 +353,63 @@ export function resolveSymbol(
     };
   }
   
-  // 多个匹配，需要进一步消歧
-  if (matches.length > 1) {
-    // 如果指定了索引，使用索引选择
-    if (query.index !== undefined) {
-      if (query.index < 0 || query.index >= matches.length) {
-        return {
-          success: false,
-          error: {
-            type: 'invalid_query',
-            message: `Index ${query.index} out of range. Found ${matches.length} matches (0-${matches.length - 1}).`,
-            suggestions: {
-              overloadOptions: matches.map(({ symbol, path }) => 
-                formatSymbolDescription(symbol, path)
-              ),
-            },
-          },
-        };
-      }
-      
-      const selected = matches[query.index];
-      return {
-        success: true,
-        position: {
-          // LSP position 是 0-based，转换为 1-based
-          line: selected.symbol.selectionRange.start.line + 1,
-          character: selected.symbol.selectionRange.start.character + 1,
-          confidence: 'exact',
-          matchedSymbol: selected.path,
-        },
-      };
-    }
-    
-    // 未指定索引且有多个匹配，返回歧义错误
+  // 唯一匹配 - 直接返回（模糊匹配的核心优化）
+  if (matches.length === 1) {
+    const match = matches[0];
+    const pos = getOptimalPosition(match.symbol, command);
     return {
-      success: false,
-      error: {
-        type: 'ambiguous',
-        message: `Found ${matches.length} symbols named '${query.name}'. Please specify --signature or --index to disambiguate.`,
-        suggestions: {
-          overloadOptions: matches.map(({ symbol, path }) => 
-            formatSymbolDescription(symbol, path)
-          ),
-        },
+      success: true,
+      position: {
+        line: pos.line,
+        character: pos.character,
+        confidence: 'exact',
+        matchedSymbol: match.path,
       },
     };
   }
   
-  // 唯一匹配
-  const match = matches[0];
+  // 多个匹配，需要进一步消歧
+  // 如果指定了索引，使用索引选择
+  if (query.index !== undefined) {
+    if (query.index < 0 || query.index >= matches.length) {
+      return {
+        success: false,
+        error: {
+          type: 'invalid_query',
+          message: `Index ${query.index} out of range. Found ${matches.length} matches (0-${matches.length - 1}).`,
+          suggestions: {
+            overloadOptions: matches.map(({ symbol, path }, idx) => 
+              `[${idx}] ${formatSymbolDescription(symbol, path)}`
+            ),
+          },
+        },
+      };
+    }
+    
+    const selected = matches[query.index];
+    const pos = getOptimalPosition(selected.symbol, command);
+    return {
+      success: true,
+      position: {
+        line: pos.line,
+        character: pos.character,
+        confidence: 'exact',
+        matchedSymbol: selected.path,
+      },
+    };
+  }
+  
+  // 未指定索引且有多个匹配，返回歧义错误（提供简化签名帮助 AI 选择）
   return {
-    success: true,
-    position: {
-      // LSP position 是 0-based，转换为 1-based
-      line: match.symbol.selectionRange.start.line + 1,
-      character: match.symbol.selectionRange.start.character + 1,
-      confidence: 'exact',
-      matchedSymbol: match.path,
+    success: false,
+    error: {
+      type: 'ambiguous',
+      message: `Found ${matches.length} symbols named '${query.name}'. Use --signature or --index to disambiguate.`,
+      suggestions: {
+        overloadOptions: matches.map(({ symbol, path }, idx) => 
+          `[${idx}] ${formatSymbolDescription(symbol, path)}`
+        ),
+      },
     },
   };
 }

@@ -39,6 +39,8 @@ export function loadConfig(): DaemonConfig {
     daemon: {
       port: 9876,
       idleTimeoutMinutes: 30,
+      maxProjects: 1,           // 默认单项目模式
+      perProjectMemory: '1g',   // 每项目 1GB
     },
   };
 
@@ -72,6 +74,8 @@ export function generateConfigTemplate(): void {
     daemon: {
       port: 9876,
       idleTimeoutMinutes: 30,
+      maxProjects: 1,           // 设置 > 1 启用多项目模式
+      perProjectMemory: '1g',   // 每项目内存限制
     },
   };
 
@@ -632,6 +636,53 @@ export class JdtLsClient {
     const uri = `file://${filePath.replace(/\\/g, '/')}`;
 
     const result = await this.connection.sendRequest('textDocument/hover', {
+      textDocument: { uri },
+      position: this.toPosition(line, character),
+    });
+
+    return result;
+  }
+
+  /**
+   * 搜索工作区符号
+   */
+  async getWorkspaceSymbols(query: string, limit?: number): Promise<any[]> {
+    if (!this.connection || !this.initialized) {
+      throw new Error('Client not initialized');
+    }
+
+    const result: any = await this.connection.sendRequest('workspace/symbol', {
+      query,
+    });
+
+    let symbols = result || [];
+    
+    // 转换 kind 为字符串
+    symbols = symbols.map((sym: any) => ({
+      ...sym,
+      kind: this.toSymbolKind(sym.kind),
+    }));
+    
+    // 限制结果数量
+    if (limit && symbols.length > limit) {
+      symbols = symbols.slice(0, limit);
+    }
+
+    return symbols;
+  }
+
+  /**
+   * 获取类型定义（跳转到变量类型的定义）
+   */
+  async getTypeDefinition(filePath: string, line: number, character: number): Promise<any> {
+    if (!this.connection || !this.initialized) {
+      throw new Error('Client not initialized');
+    }
+
+    await this.openFile(filePath);
+    const uri = `file://${filePath.replace(/\\/g, '/')}`;
+
+    const result = await this.connection.sendRequest('textDocument/typeDefinition', {
       textDocument: { uri },
       position: this.toPosition(line, character),
     });
