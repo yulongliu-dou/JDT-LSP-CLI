@@ -300,16 +300,71 @@ jls definition ./Test.java --method process --index 1
 jls [command] [options]
 
 选项:
-  -p, --project <path>    Java 项目根目录 (默认: 当前目录)
+  -p, --project <path>    Java 项目根目录 (默认：当前目录)
   --jdtls-path <path>     指定 eclipse.jdt.ls 路径 (可选)
   --data-dir <path>       JDT LS 数据目录 (可选)
   -v, --verbose           显示详细日志
-  --timeout <ms>          操作超时时间 (默认: 60000)
+  --timeout <ms>          操作超时时间 (默认：60000)
   --no-daemon             禁用守护进程模式，每次命令重新启动 JDT LS
   --json-compact          紧凑 JSON 输出，仅返回核心字段（v1.4.0+）
   -V, --version           显示版本号
   -h, --help              显示帮助信息
 ```
+
+### 紧凑输出模式（--json-compact）
+
+使用 `--json-compact` 可以显著减少输出体积，适合 AI Agent 快速解析。
+
+**示例：**
+```bash
+# 标准输出 - 包含完整 Location 对象
+jls def src/App.java --symbol userService
+
+# 紧凑输出 - 只保留核心字段（uri + range.start）
+jls def src/App.java --symbol userService --json-compact
+```
+
+**对比：**
+```json
+// 标准输出
+{
+  "success": true,
+  "data": [
+    {
+      "uri": "file:///project/src/UserService.java",
+      "range": {
+        "start": { "line": 10, "character": 4 },
+        "end": { "line": 10, "character": 20 }
+      }
+    }
+  ]
+}
+
+// 紧凑输出 (--json-compact)
+{
+  "success": true,
+  "data": [
+    {
+      "uri": "file:///project/src/UserService.java",
+      "range": {
+        "start": { "line": 10, "character": 4 }
+      }
+    }
+  ]
+}
+```
+
+**各命令的紧凑字段映射：**
+| 命令 | 紧凑字段 |
+|------|----------|
+| `definition` | `uri`, `range.start.line`, `range.start.character` |
+| `references` | `uri`, `range.start.line` |
+| `symbols` | `name`, `kind`, `range.start.line` |
+| `call-hierarchy` | `entry`, `calls`, `totalMethods` |
+| `hover` | `contents` |
+| `implementations` | `uri`, `range.start.line` |
+| `type-definition` | `uri`, `range.start.line` |
+| `workspaceSymbols` | `name`, `kind`, `location.uri`, `location.range.start.line` |
 
 ## 命令详解
 
@@ -693,8 +748,9 @@ jls typedef src/main/java/com/example/App.java --symbol userService
 
 ### 全局定位（v1.4.0+）
 
-使用 `--global` 选项可在不知道文件路径的情况下定位方法：
+使用 `--global` 选项可在不知道文件路径的情况下定位方法，特别适合大型项目中快速查找符号。
 
+**示例：**
 ```bash
 # 全局搜索方法并获取定义
 jls def --global --method processOrder
@@ -703,7 +759,13 @@ jls def --global --method processOrder
 jls refs --global --method UserService.findById
 
 # 全局搜索方法的调用链
-jls ch --global --method execute
+jls ch --global --method execute --depth 3
+
+# 全局搜索接口实现
+jls impl --global --symbol PaymentGateway.charge --kind Method
+
+# 带签名消歧的全局定位
+jls def --global --method process --signature "(String)" --index 0
 ```
 
 **工作原理：**
@@ -711,17 +773,74 @@ jls ch --global --method execute
 2. 获取文件路径后，使用 `documentSymbol` 精确定位方法位置
 3. 执行相应的 LSP 操作（定义、引用、调用链等）
 
+**输出示例（多匹配消歧）：**
+当有多个同名方法时，返回候选列表供选择：
+```json
+{
+  "success": false,
+  "error": "Found 3 matches for 'process'. Use --index to select.",
+  "data": {
+    "candidates": [
+      {
+        "index": 0,
+        "name": "process",
+        "kind": "Method",
+        "container": "com.example.OrderService",
+        "file": "/project/src/OrderService.java",
+        "line": 25
+      },
+      {
+        "index": 1,
+        "name": "process",
+        "kind": "Method",
+        "container": "com.example.PaymentService",
+        "file": "/project/src/PaymentService.java",
+        "line": 48
+      }
+    ]
+  }
+}
+```
+
+**使用建议：**
+- 唯一名称：直接使用 `--global --method methodName`
+- 重载方法：添加 `--signature` 或 `--index` 消歧
+- 大型项目：先用 `jls find` 预览所有匹配，再用 `--index` 精确定位
+
 ## 多项目支持（v1.4.0+）
 
-守护进程模式支持同时管理多个 Java 项目，通过配置 `maxProjects` 启用：
+守护进程模式支持同时管理多个 Java 项目，通过配置 `maxProjects` 启用。适合多模块项目或需要频繁切换项目的场景。
 
 ### 配置多项目
+
+编辑 `~/.jdt-lsp-cli/config.json`：
 
 ```json
 {
   "daemon": {
-    "maxProjects": 3,           // 最大同时活跃项目数
-    "perProjectMemory": "1g"    // 每项目内存限制
+    "maxProjects": 3,           // 最大同时活跃项目数（>1 启用多项目模式）
+    "perProjectMemory": "1g",   // 每项目内存限制
+    "idleTimeoutMinutes": 30    // 空闲超时（分钟），0=不超时
+  }
+}
+```
+
+### 项目优先级配置（可选）
+
+为重要项目设置高优先级，避免被 LRU 淘汰：
+
+```json
+{
+  "projects": {
+    "/path/to/core-project": {
+      "priority": 10,           // 高优先级（值越大越不容易被淘汰）
+      "jvmConfig": {
+        "xmx": "2g"             // 该项目单独的 JVM 配置
+      }
+    },
+    "/path/to/test-project": {
+      "priority": 1             // 低优先级，可被淘汰
+    }
   }
 }
 ```
@@ -729,13 +848,20 @@ jls ch --global --method execute
 ### 多项目命令
 
 ```bash
+# 启动守护进程（自动启用多项目模式）
+jls daemon start
+
+# 预初始化多个项目（后台逐步加载）
+jls daemon start --eager --project /path/to/project1
+jls daemon start --eager --project /path/to/project2
+
 # 查看所有已加载项目
 jls daemon list
 
 # 查看守护进程状态（包含项目列表）
 jls daemon status
 
-# 手动释放指定项目
+# 手动释放指定项目（回收内存）
 jls daemon release /path/to/project
 
 # 停止守护进程（释放所有项目）
@@ -744,9 +870,35 @@ jls daemon stop
 
 ### 项目管理策略
 
-- **LRU 淘汰**：当项目数达到 `maxProjects` 时，自动淘汰最久未使用的项目
-- **优先级保护**：可通过配置为重要项目设置高优先级，避免被淘汰
-- **自动初始化**：首次请求某项目时自动初始化
+**LRU 淘汰机制：**
+- 当活跃项目数达到 `maxProjects` 时，自动淘汰最久未访问的项目
+- 优先级高的项目优先保留
+- 同优先级时，淘汰最近最少使用的项目
+
+**使用场景示例：**
+
+```bash
+# 场景 1：多模块 Maven 项目
+# 父项目 + 多个子模块共享一个 JDT LS 实例
+jls daemon start --eager --project /path/to/multi-module-project
+
+# 场景 2：微服务架构
+# 同时维护多个微服务项目，根据访问频率自动管理
+jls ch /service-a/src/OrderService.java --method createOrder
+jls ch /service-b/src/PaymentService.java --method processPayment
+# 第三个项目访问时，可能淘汰最久未使用的项目
+jls ch /service-c/src/NotificationService.java --method sendEmail
+
+# 场景 3：核心项目常驻 + 临时项目按需加载
+# 配置核心项目 priority=10，临时项目 priority=1
+# 临时项目完成后手动释放，保留核心项目
+jls daemon release /path/to/temp-project
+```
+
+**性能优化建议：**
+- **小内存机器**：设置 `maxProjects: 1-2`，`perProjectMemory: "512m"`
+- **中型项目**：设置 `maxProjects: 3`，`perProjectMemory: "1g"`
+- **大型项目**：设置 `maxProjects: 5+`，`perProjectMemory: "2g"`，为核心项目配置高优先级
 
 ## 输出格式
 
