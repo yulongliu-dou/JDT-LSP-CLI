@@ -27,7 +27,7 @@ import * as http from 'http';
 import { JdtLsClient, loadConfig, generateConfigTemplate, CONFIG_FILE, DEFAULT_JVM_CONFIG } from './jdtClient';
 import { CLIResult, SymbolInfo, COMPACT_FIELDS } from './types';
 import { startDaemon, getDaemonStatus, stopDaemon, DAEMON_PORT } from './daemon';
-import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult, CommandType } from './symbolResolver';
+import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult, CommandType, matchSignature } from './symbolResolver';
 
 const program = new Command();
 
@@ -282,15 +282,52 @@ async function resolveGlobalPosition(
   
   // 过滤符号类型（如果指定）
   const kindFilter = (cmdOptions.kind || 'Method').toLowerCase();
-  let filtered = symbols.filter((s: any) => 
-    s.kind?.toLowerCase() === kindFilter && 
-    s.name?.toLowerCase().includes(methodName.toLowerCase())
+  
+  // 先按 kind 过滤，然后精确匹配名称
+  const sameKindSymbols = symbols.filter((s: any) => 
+    s.kind?.toLowerCase() === kindFilter
   );
   
-  // 优先精确匹配
-  const exactMatch = filtered.find((s: any) => s.name === methodName);
-  if (exactMatch) {
-    filtered = [exactMatch, ...filtered.filter((s: any) => s !== exactMatch)];
+  // 精确匹配名称
+  let filtered = sameKindSymbols.filter((s: any) => 
+    s.name === methodName
+  );
+  
+  // 如果没有精确匹配，尝试不区分大小写的精确匹配
+  if (filtered.length === 0) {
+    filtered = sameKindSymbols.filter((s: any) => 
+      s.name?.toLowerCase() === methodName.toLowerCase()
+    );
+  }
+  
+  // 如果提供了签名，按签名过滤（用于区分重载方法）
+  if (cmdOptions.signature && filtered.length > 0) {
+    const signatureFiltered = filtered.filter((s: any) => 
+      matchSignature(s.containerName || s.detail, cmdOptions.signature)
+    );
+    
+    // 如果签名过滤后有结果，使用过滤后的结果
+    // 如果没有匹配，保留原结果并给出警告
+    if (signatureFiltered.length > 0) {
+      filtered = signatureFiltered;
+    } else {
+      return {
+        success: false,
+        error: `Found ${filtered.length} matches for '${methodName}', but none match signature '${cmdOptions.signature}'`,
+        data: {
+          candidates: filtered.map((s: any, idx: number) => ({
+            index: idx,
+            name: s.name,
+            kind: s.kind,
+            container: s.containerName,
+            detail: s.detail,
+            file: s.location?.uri?.replace('file://', ''),
+            line: (s.location?.range?.start?.line || 0) + 1,
+          }))
+        },
+        elapsed: 0,
+      };
+    }
   }
   
   if (filtered.length === 0) {
@@ -377,7 +414,12 @@ async function getPosition(
     }
     return {
       success: false,
-      error: 'File path is required',
+      error: 'Missing required arguments. Usage:\n' +
+             '  jls <command> <file> <line> <col>\n' +
+             '  jls <command> <file> --method <name>\n' +
+             '  jls <command> <file> --symbol <name>\n' +
+             '  jls <command> --global --symbol <name> --kind <type>\n' +
+             '\nUse --help for more information.',
       elapsed: 0,
     };
   }

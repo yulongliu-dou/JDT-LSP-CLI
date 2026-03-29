@@ -444,7 +444,9 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
           return;
         }
-        result = await activeClient.getTypeDefinition(file, posResult.line, posResult.col);
+        const typeDefResult = await activeClient.getTypeDefinition(file, posResult.line, posResult.col);
+        // 确保返回统一格式
+        result = typeDefResult || { locations: [], count: 0 };
         break;
       }
       

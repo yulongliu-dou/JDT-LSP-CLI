@@ -682,12 +682,29 @@ export class JdtLsClient {
     await this.openFile(filePath);
     const uri = `file://${filePath.replace(/\\/g, '/')}`;
 
-    const result = await this.connection.sendRequest('textDocument/typeDefinition', {
-      textDocument: { uri },
-      position: this.toPosition(line, character),
-    });
+    try {
+      const result = await this.connection.sendRequest('textDocument/typeDefinition', {
+        textDocument: { uri },
+        position: this.toPosition(line, character),
+      });
 
-    return result;
+      // 处理空结果
+      if (!result || (Array.isArray(result) && result.length === 0)) {
+        return { locations: [], count: 0, message: 'No type definition found' };
+      }
+
+      // 统一返回格式
+      const locations = Array.isArray(result) ? result : [result];
+      return { locations, count: locations.length };
+    } catch (error: any) {
+      // 捕获 LSP 错误并返回友好格式
+      return { 
+        locations: [], 
+        count: 0, 
+        error: error.message || 'Failed to get type definition',
+        errorDetails: error
+      };
+    }
   }
 
   /**
