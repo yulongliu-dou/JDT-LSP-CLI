@@ -35,7 +35,7 @@ const program = new Command();
 program
   .name('jls')
   .description('Java LSP CLI - Fast Java language features for AI agents (with daemon support)')
-  .version('1.6.3')
+  .version('1.6.4')
   .option('-p, --project <path>', 'Java project root directory', process.cwd())
   .option('--jdtls-path <path>', 'Path to eclipse.jdt.ls server')
   .option('--data-dir <path>', 'JDT LS data directory')
@@ -46,18 +46,50 @@ program
 
 /**
  * 紧凑化数据对象（只保留指定字段）
+ * 
+ * 支持两种数据结构：
+ * 1. 直接数组: [...] - 对数组元素进行字段提取
+ * 2. 包装对象: { field: [...], count: N } - 对内部数组进行字段提取，保留包装结构
  */
 function compactData(data: any, command: string): any {
   const fields = (COMPACT_FIELDS as any)[command];
   if (!fields || !data) return data;
   
-  // 处理数组
+  // 处理数组（直接返回数组的情况）
   if (Array.isArray(data)) {
     return data.map(item => compactItem(item, fields));
   }
   
-  // 处理对象
-  return compactItem(data, fields);
+  // 处理对象 - 检查是否是包装对象结构
+  if (typeof data === 'object' && data !== null) {
+    // 定义命令到数组字段的映射（包装对象中的数组字段名）
+    const arrayFieldMap: Record<string, string> = {
+      'symbols': 'symbols',
+      'sym': 'symbols',
+      'references': 'references',
+      'refs': 'references',
+      'implementations': 'implementations',
+      'impl': 'implementations',
+      'workspaceSymbols': 'symbols',
+      'find': 'symbols',
+      'f': 'symbols',
+    };
+    
+    const arrayField = arrayFieldMap[command];
+    
+    // 如果是包装对象结构，对内部数组进行紧凑化
+    if (arrayField && Array.isArray(data[arrayField])) {
+      return {
+        ...data,
+        [arrayField]: data[arrayField].map((item: any) => compactItem(item, fields))
+      };
+    }
+    
+    // 否则对整个对象进行字段提取
+    return compactItem(data, fields);
+  }
+  
+  return data;
 }
 
 function compactItem(item: any, fields: string[]): any {

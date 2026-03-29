@@ -173,8 +173,12 @@ export interface CompactFieldConfig {
   callHierarchy: string[];
   hover: string[];
   implementations: string[];
+  impl: string[];  // 别名
   typeDefinition: string[];
+  typedef: string[];  // 别名
   workspaceSymbols: string[];
+  find: string[];  // 别名
+  f: string[];     // 别名
 }
 
 /**
@@ -189,8 +193,12 @@ export const COMPACT_FIELDS: CompactFieldConfig = {
   callHierarchy: ['entry', 'calls', 'totalMethods'],
   hover: ['contents'],
   implementations: ['uri', 'range.start.line'],
+  impl: ['uri', 'range.start.line'],  // 别名支持
   typeDefinition: ['uri', 'range.start.line'],
+  typedef: ['uri', 'range.start.line'],  // 别名支持
   workspaceSymbols: ['name', 'kind', 'location.uri', 'location.range.start.line'],
+  find: ['name', 'kind', 'location.uri', 'location.range.start.line'],  // 别名支持
+  f: ['name', 'kind', 'location.uri', 'location.range.start.line'],  // 别名支持
 };
 
 // Symbol kinds mapping
