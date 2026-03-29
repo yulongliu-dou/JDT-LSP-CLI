@@ -731,7 +731,7 @@ function addSymbolOptions(cmd: any): any {
 
 // call-hierarchy
 let callHierarchyCmd = program
-  .command('call-hierarchy <file> [line] [col]')
+  .command('call-hierarchy [file] [line] [col]')
   .alias('ch')
   .description('Get call hierarchy for a method. Use --method for auto-positioning.')
   .option('-d, --depth <n>', 'Maximum recursion depth', '5')
@@ -817,7 +817,7 @@ callHierarchyCmd.action(async (file: string, line: string | undefined, col: stri
 
 // definition
 let definitionCmd = program
-  .command('definition <file> [line] [col]')
+  .command('definition [file] [line] [col]')
   .alias('def')
   .description('Go to definition of a symbol. Use --symbol for auto-positioning.');
 definitionCmd = addSymbolOptions(definitionCmd);
@@ -859,7 +859,7 @@ definitionCmd.action(async (file: string, line: string | undefined, col: string 
 
 // references
 let referencesCmd = program
-  .command('references <file> [line] [col]')
+  .command('references [file] [line] [col]')
   .alias('refs')
   .description('Find all references to a symbol. Use --symbol for auto-positioning.')
   .option('--no-declaration', 'Exclude the declaration itself');
@@ -1000,7 +1000,7 @@ program
 
 // type-definition
 let typeDefCmd = program
-  .command('type-definition <file> [line] [col]')
+  .command('type-definition [file] [line] [col]')
   .alias('typedef')
   .description('Go to type definition (e.g., variable type -> class). Use --symbol for auto-positioning.');
 typeDefCmd = addSymbolOptions(typeDefCmd);
@@ -1042,7 +1042,7 @@ typeDefCmd.action(async (file: string, line: string | undefined, col: string | u
 
 // implementations
 let implementationsCmd = program
-  .command('implementations <file> [line] [col]')
+  .command('implementations [file] [line] [col]')
   .alias('impl')
   .description('Find implementations. Use --symbol for auto-positioning.');
 implementationsCmd = addSymbolOptions(implementationsCmd);
@@ -1085,7 +1085,7 @@ implementationsCmd.action(async (file: string, line: string | undefined, col: st
 
 // hover
 let hoverCmd = program
-  .command('hover <file> [line] [col]')
+  .command('hover [file] [line] [col]')
   .description('Get hover information. Use --symbol for auto-positioning.');
 hoverCmd = addSymbolOptions(hoverCmd);
 hoverCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
