@@ -749,24 +749,30 @@ jls typedef src/main/java/com/example/App.java --symbol userService
 
 ### 全局定位（v1.4.0+）
 
-使用 `--global` 选项可在不知道文件路径的情况下定位方法，特别适合大型项目中快速查找符号。
+使用 `--global` 选项可在不知道文件路径的情况下定位符号，特别适合大型项目中快速查找符号。
 
-**示例：**
+⚠️ **重要限制说明**：
+- `--global` 选项基于 `workspace/symbol` LSP 请求
+- JDT Language Server 主要支持**类级别**的全局符号搜索
+- **必须同时提供 `--symbol` 和 `--kind` 参数**
+
+**✅ 正确用法：**
 ```bash
-# 全局搜索方法并获取定义
-jls def --global --method processOrder
+# 全局搜索类并获取定义
+jls def --global --symbol "ArrayList" --kind class
 
-# 全局搜索方法的引用
-jls refs --global --method UserService.findById
+# 全局搜索接口并查找实现
+jls impl --global --symbol "Runnable" --kind interface
 
-# 全局搜索方法的调用链
-jls ch --global --method execute --depth 3
+# 全局搜索字段
+jls refs --global --symbol "length" --kind field
+```
 
-# 全局搜索接口实现
-jls impl --global --symbol PaymentGateway.charge --kind Method
-
-# 带签名消歧的全局定位
-jls def --global --method process --signature "(String)" --index 0
+**❌ 错误用法（不受支持）：**
+```bash
+jls def --global --method "toString"          # ❌ 不支持单独使用 --method
+jls def --global --symbol "String"            # ❌ 缺少 --kind 参数
+jls def --global                             # ❌ 必须指定搜索内容
 ```
 
 **工作原理：**

@@ -716,7 +716,7 @@ const symbolOptions = [
   { flags: '--signature <sig>', desc: 'Method signature for overloads, e.g., "(String, int)"' },
   { flags: '--index <n>', desc: 'Index for multiple matches (0-based)' },
   { flags: '--kind <type>', desc: 'Symbol kind: Method, Field, Class, Interface' },
-  { flags: '--global', desc: 'Search globally without file path (requires --method or --symbol)' },
+  { flags: '--global', desc: '⚠️ Global search (requires --symbol AND --kind, JDT LS limitation)' },
 ];
 
 /**
