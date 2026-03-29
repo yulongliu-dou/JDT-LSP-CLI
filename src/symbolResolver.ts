@@ -97,10 +97,19 @@ export function normalizeSignature(signature: string, stripGenerics: boolean = t
  * 支持两种查询格式:
  * - 带括号: "(String, int)" - 用户友好的格式
  * - 不带括号: "String, int" - 内部处理格式
+ * 
+ * @param symbolDetail - 符号的 detail 字段（可能包含签名和返回类型）
+ * @param querySignature - 用户查询的签名
+ * @param symbolName - 可选的符号名称（用于从 name 中提取签名，如 "methodName(Type, int)"）
  */
-export function matchSignature(symbolDetail: string | undefined, querySignature: string): boolean {
+export function matchSignature(symbolDetail: string | undefined, querySignature: string, symbolName?: string): boolean {
   // 从 symbolDetail 提取签名（从 "methodName(String, int) : void" 提取 "String, int"）
-  const symbolSigFromDetail = extractSignature(symbolDetail);
+  let symbolSigFromDetail = extractSignature(symbolDetail);
+  
+  // 如果 detail 中没有签名（如 documentSymbol 返回的 detail 只有返回类型），尝试从 name 中提取
+  if (!symbolSigFromDetail && symbolName) {
+    symbolSigFromDetail = extractSignature(symbolName);
+  }
   
   // 从 querySignature 提取签名（处理带括号和不带括号的情况）
   // 如果用户传入 "(boolean)"，需要提取为 "boolean"
@@ -271,7 +280,7 @@ function findMatchingSymbols(
     if (query.kind && symbol.kind !== query.kind) return false;
     
     // 签名匹配（如果指定）- 已支持模糊匹配
-    if (query.signature && !matchSignature(symbol.detail, query.signature)) {
+    if (query.signature && !matchSignature(symbol.detail, query.signature, symbol.name)) {
       return false;
     }
     
@@ -313,23 +322,36 @@ function formatSymbolDescription(symbol: SymbolInfo, path: string): string {
 }
 
 /**
+ * 从方法名中提取签名部分
+ * 例: "resolveTypeHandler(Type, JdbcType, String)" -> "(Type, JdbcType, String)"
+ */
+function extractSignatureFromName(name: string): string {
+  const match = name.match(/\((.*)\)$/);
+  return match ? `(${match[1]})` : '()';
+}
+
+/**
  * 生成用于 overloadOptions 的符号描述（包含索引）
  * 
  * 格式: "[index] name [kind] - signature : returnType"
+ * 示例: "[0] resolveTypeHandler [Method] - (Type, JdbcType, String) : TypeHandler<?>"
  */
 function formatOverloadOption(symbol: SymbolInfo, path: string, index: number): string {
   const kindStr = symbol.kind ? ` [${symbol.kind}]` : '';
-  const name = path.split('.').pop() || symbol.name;
+  const fullName = path.split('.').pop() || symbol.name;
   
   // 对于方法，显示完整签名和返回类型
   if (symbol.kind === 'Method' || symbol.kind === 'Constructor') {
-    const signature = extractSimpleSignature(symbol.detail);
     const returnType = extractReturnType(symbol.detail);
     const returnStr = returnType ? ` : ${returnType}` : '';
-    return `[${index}] ${name}${kindStr} - ${name}${signature}${returnStr}`;
+    // 从 fullName 中提取纯方法名（去掉括号及其后面的内容）
+    const simpleName = fullName.split('(')[0];
+    // 从 name 字段提取签名（因为 documentSymbol 的签名在 name 中）
+    const signature = extractSignatureFromName(symbol.name);
+    return `[${index}] ${simpleName}${kindStr} - ${signature}${returnStr}`;
   }
   
-  return `[${index}] ${name}${kindStr}`;
+  return `[${index}] ${fullName}${kindStr}`;
 }
 
 /**
