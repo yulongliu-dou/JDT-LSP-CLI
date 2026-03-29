@@ -290,9 +290,10 @@ jls definition ./Test.java --method process --index 1
 
 ### 兼容性
 
-- 保留原有 `<file> <line> <col>` 参数方式
+- 保留原有 `<file> <line> <col>` 参数方式（文件参数现为可选）
 - 新旧方式互斥，优先使用 `--method/--symbol`
 - 守护进程和直接模式均支持
+- 文件参数变为可选后，支持基于符号名称的智能定位功能
 
 ## 全局选项
 
@@ -370,10 +371,10 @@ jls def src/App.java --symbol userService --json-compact
 
 ### 1. call-hierarchy (ch) - 调用链分析
 
-获取指定方法的调用链，分析方法调用了哪些其他方法。
+获取指定方法的调用链，分析方法调用了哪些其他方法。支持通过文件位置或符号名称自动定位。
 
 ```bash
-jls ch <file> [line] [col] [options]
+jls ch [file] [line] [col] [options]
 
 选项:
   -d, --depth <n>       最大递归深度 (默认: 5)
@@ -423,10 +424,10 @@ jls ch src/main/java/com/example/Service.java --method execute --incoming
 
 ### 2. definition (def) - 跳转定义
 
-获取符号（类、方法、变量）的定义位置。
+获取符号（类、方法、变量）的定义位置。支持通过文件位置或符号名称自动定位。
 
 ```bash
-jls def <file> [line] [col] [options]
+jls def [file] [line] [col] [options]
 
 选项:
   --method <name>       通过方法名自动定位
@@ -467,10 +468,10 @@ jls def src/main/java/com/example/App.java --method findUser --signature "(Long)
 
 ### 3. references (refs) - 查找引用
 
-查找符号在整个项目中的所有引用位置。
+查找符号在整个项目中的所有引用位置。支持通过文件位置或符号名称自动定位。
 
 ```bash
-jls refs <file> [line] [col] [options]
+jls refs [file] [line] [col] [options]
 
 选项:
   --no-declaration      不包含声明本身
@@ -552,10 +553,10 @@ jls sym src/main/java/com/example/UserService.java --flat
 
 ### 5. implementations (impl) - 查找实现
 
-查找接口或抽象方法的所有实现。
+查找接口或抽象方法的所有实现。支持通过文件位置或符号名称自动定位。
 
 ```bash
-jls impl <file> [line] [col] [options]
+jls impl [file] [line] [col] [options]
 
 选项:
   --method <name>       通过方法名自动定位
@@ -601,10 +602,10 @@ jls impl src/main/java/com/example/PaymentGateway.java --symbol charge --kind Me
 
 ### 6. hover - 悬停信息
 
-获取符号的类型信息和文档注释。
+获取符号的类型信息和文档注释。支持通过文件位置或符号名称自动定位。
 
 ```bash
-jls hover <file> [line] [col] [options]
+jls hover [file] [line] [col] [options]
 
 选项:
   --method <name>       通过方法名自动定位
@@ -689,10 +690,10 @@ jls find Config --limit 10
 
 ### 8. type-definition (typedef) - 类型跳转（v1.4.0+）
 
-跳转到变量或表达式的类型定义。
+跳转到变量或表达式的类型定义。支持通过文件位置或符号名称自动定位。
 
 ```bash
-jls typedef <file> [line] [col] [options]
+jls typedef [file] [line] [col] [options]
 
 选项:
   --method <name>       通过方法名自动定位
@@ -731,9 +732,9 @@ jls typedef src/main/java/com/example/App.java --symbol userService
 ## 位置参数说明
 
 **传统方式（行列定位）：**
-- `<file>`: Java 源文件路径（支持相对路径和绝对路径）
-- `<line>`: 行号（从 1 开始，与 IDE 显示一致）
-- `<col>`: 列号（从 1 开始，光标在符号上的位置）
+- `[file]`: Java 源文件路径（可选，支持相对路径和绝对路径）
+- `[line]`: 行号（可选，从 1 开始，与 IDE 显示一致）
+- `[col]`: 列号（可选，从 1 开始，光标在符号上的位置）
 
 **符号定位方式（推荐 AI 使用）：**
 - `--method <name>`: 通过方法名自动定位
@@ -744,7 +745,7 @@ jls typedef src/main/java/com/example/App.java --symbol userService
 - `--kind <type>`: 符号类型（Method, Field, Class, Interface...）
 - `--global`: 全局定位，无需指定文件路径（v1.4.0+）
 
-**提示：** 使用符号定位方式时，无需指定行列参数，工具会自动解析符号位置。
+**提示：** 使用符号定位方式时，文件路径和行列参数均为可选，工具会自动解析符号位置。若同时提供文件路径，则会在该文件范围内搜索符号。
 
 ### 全局定位（v1.4.0+）
 
