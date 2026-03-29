@@ -14,6 +14,16 @@ import { JdtLsClient } from './jdtClient';
 import { CLIOptions, DaemonConfig, ProjectConfig } from './types';
 
 /**
+ * 项目加载事件类型
+ */
+export type ProjectLoadEvent = {
+  type: 'new' | 'reused' | 'reloaded';
+  projectPath: string;
+  loadTime?: number;
+  evictedProject?: string;
+};
+
+/**
  * 项目客户端状态
  */
 interface ProjectClient {
@@ -23,6 +33,7 @@ interface ProjectClient {
   priority: number;
   status: 'initializing' | 'ready' | 'error';
   initPromise?: Promise<void>;
+  loadEvent?: ProjectLoadEvent;  // 记录加载事件
 }
 
 /**
@@ -40,8 +51,9 @@ export class ProjectPool {
 
   /**
    * 获取项目客户端（如果不存在则创建）
+   * @returns 客户端和加载事件信息
    */
-  async getClient(projectPath: string, options: Partial<CLIOptions> = {}): Promise<JdtLsClient> {
+  async getClient(projectPath: string, options: Partial<CLIOptions> = {}): Promise<{ client: JdtLsClient; loadEvent?: ProjectLoadEvent }> {
     const normalizedPath = path.resolve(projectPath);
     
     // 检查现有客户端
@@ -56,7 +68,8 @@ export class ProjectPool {
       
       if (existing.status === 'ready') {
         this.log('Reusing existing client for project:', normalizedPath);
-        return existing.client;
+        existing.loadEvent = { type: 'reused', projectPath: normalizedPath };
+        return { client: existing.client, loadEvent: existing.loadEvent };
       }
       
       // 如果状态是 error，移除并重新创建
@@ -66,19 +79,20 @@ export class ProjectPool {
     }
     
     // 检查容量，必要时淘汰
+    let evictedProject: string | undefined;
     const maxProjects = this.config.daemon?.maxProjects || 1;
     if (this.clients.size >= maxProjects) {
-      await this.evictLRU();
+      evictedProject = await this.evictLRU();
     }
     
     // 创建新客户端
-    return await this.createClient(normalizedPath, options);
+    return await this.createClient(normalizedPath, options, evictedProject);
   }
 
   /**
    * 创建新的项目客户端
    */
-  private async createClient(projectPath: string, options: Partial<CLIOptions> = {}): Promise<JdtLsClient> {
+  private async createClient(projectPath: string, options: Partial<CLIOptions> = {}, evictedProject?: string): Promise<{ client: JdtLsClient; loadEvent: ProjectLoadEvent }> {
     this.log('Creating new client for project:', projectPath);
     
     // 获取项目配置
@@ -108,20 +122,30 @@ export class ProjectPool {
       jdtlsPath: options.jdtlsPath,
     }, jvmConfig);
     
+    const loadEvent: ProjectLoadEvent = {
+      type: evictedProject ? 'reloaded' : 'new',
+      projectPath,
+      evictedProject,
+    };
+    
     const projectClient: ProjectClient = {
       client,
       projectPath,
       lastAccess: Date.now(),
       priority,
       status: 'initializing',
+      loadEvent,
     };
+    
+    const startTime = Date.now();
     
     // 设置初始化 Promise
     projectClient.initPromise = (async () => {
       try {
         await client.start();
         projectClient.status = 'ready';
-        this.log('Client ready for project:', projectPath);
+        loadEvent.loadTime = Date.now() - startTime;
+        this.log('Client ready for project:', projectPath, `(loaded in ${loadEvent.loadTime}ms)`);
       } catch (error: any) {
         projectClient.status = 'error';
         this.log('Failed to initialize client for project:', projectPath, error.message);
@@ -132,14 +156,15 @@ export class ProjectPool {
     this.clients.set(projectPath, projectClient);
     
     await projectClient.initPromise;
-    return client;
+    return { client, loadEvent };
   }
 
   /**
    * 淘汰最近最少使用的项目（LRU）
+   * @returns 被淘汰的项目路径，如果没有淘汰则返回 undefined
    */
-  private async evictLRU(): Promise<void> {
-    if (this.clients.size === 0) return;
+  private async evictLRU(): Promise<string | undefined> {
+    if (this.clients.size === 0) return undefined;
     
     // 找到优先级最低、最久未使用的项目
     let candidate: ProjectClient | null = null;
@@ -168,7 +193,10 @@ export class ProjectPool {
     if (candidatePath) {
       this.log('Evicting project due to capacity limit:', candidatePath);
       await this.releaseProject(candidatePath);
+      return candidatePath;
     }
+    
+    return undefined;
   }
 
   /**

@@ -674,7 +674,7 @@ export class JdtLsClient {
   /**
    * 获取类型定义（跳转到变量类型的定义）
    */
-  async getTypeDefinition(filePath: string, line: number, character: number): Promise<any> {
+  async getTypeDefinition(filePath: string, line: number, character: number, explainEmpty?: boolean): Promise<any> {
     if (!this.connection || !this.initialized) {
       throw new Error('Client not initialized');
     }
@@ -690,7 +690,14 @@ export class JdtLsClient {
 
       // 处理空结果
       if (!result || (Array.isArray(result) && result.length === 0)) {
-        return { locations: [], count: 0, message: 'No type definition found' };
+        // 分析空结果原因
+        const reason = explainEmpty ? await this.analyzeTypeDefEmptyReason(filePath, line, character) : null;
+        return { 
+          locations: [], 
+          count: 0, 
+          message: 'No type definition found',
+          ...(reason || {})
+        };
       }
 
       // 统一返回格式
@@ -699,13 +706,122 @@ export class JdtLsClient {
     } catch (error: any) {
       // 捕获 LSP 错误并返回友好格式
       this.log('Type definition error:', error);
+      
+      // 对于接口方法等预期内的空结果，分析原因
+      const reason = explainEmpty ? await this.analyzeTypeDefEmptyReason(filePath, line, character) : null;
+      
       return { 
         locations: [], 
         count: 0, 
         error: error.message || 'Failed to get type definition',
+        ...(reason || {}),
         errorDetails: error
       };
     }
+  }
+
+  /**
+   * 分析 typeDefinition 返回空结果的原因
+   */
+  private async analyzeTypeDefEmptyReason(filePath: string, line: number, character: number): Promise<{ reason?: string; suggestion?: string } | null> {
+    try {
+      // 获取文档符号
+      const symbols = await this.getDocumentSymbols(filePath);
+      
+      // 查找当前位置的符号
+      const symbol = this.findSymbolAtPosition(symbols, line - 1, character - 1);
+      
+      if (!symbol) {
+        return {
+          reason: 'no_symbol_at_position',
+          suggestion: 'No symbol found at the specified position'
+        };
+      }
+
+      // 检查是否在接口方法上
+      const parentChain = this.getParentChain(symbols, line - 1, character - 1);
+      const isInterfaceMethod = parentChain.some(s => s.kind === 'Interface') && symbol.kind === 'Method';
+      
+      if (isInterfaceMethod) {
+        return {
+          reason: 'interface_method_no_implementation',
+          suggestion: 'Interface methods have no implementation. Try using "definition" instead of "type-definition" to jump to the method declaration.'
+        };
+      }
+
+      // 检查是否是基本类型
+      if (symbol.detail) {
+        const returnType = symbol.detail.replace(/^.*:\s*/, '').trim();
+        const primitiveTypes = ['void', 'int', 'long', 'short', 'byte', 'float', 'double', 'boolean', 'char'];
+        if (primitiveTypes.includes(returnType)) {
+          return {
+            reason: 'primitive_type',
+            suggestion: `The return type '${returnType}' is a primitive type without a class definition.`
+          };
+        }
+      }
+
+      return {
+        reason: 'unknown',
+        suggestion: 'Unable to determine the type definition. The symbol may be unresolved or the type may be from an external library without source.'
+      };
+    } catch (e) {
+      this.log('Failed to analyze empty type definition reason:', e);
+      return null;
+    }
+  }
+
+  /**
+   * 在符号树中查找指定位置的符号
+   */
+  private findSymbolAtPosition(symbols: any[], line: number, character: number): any | null {
+    for (const symbol of symbols) {
+      const range = symbol.range;
+      if (this.isPositionInRange(line, character, range)) {
+        // 优先返回子符号（更精确）
+        if (symbol.children && symbol.children.length > 0) {
+          const child = this.findSymbolAtPosition(symbol.children, line, character);
+          if (child) return child;
+        }
+        return symbol;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 获取符号的父链
+   */
+  private getParentChain(symbols: any[], line: number, character: number): any[] {
+    const chain: any[] = [];
+    this.findParentChainRecursive(symbols, line, character, chain);
+    return chain;
+  }
+
+  private findParentChainRecursive(symbols: any[], line: number, character: number, chain: any[]): boolean {
+    for (const symbol of symbols) {
+      const range = symbol.range;
+      if (this.isPositionInRange(line, character, range)) {
+        chain.push(symbol);
+        if (symbol.children && symbol.children.length > 0) {
+          if (this.findParentChainRecursive(symbol.children, line, character, chain)) {
+            return true;
+          }
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 检查位置是否在范围内
+   */
+  private isPositionInRange(line: number, character: number, range: any): boolean {
+    if (line < range.start.line || line > range.end.line) return false;
+    if (line === range.start.line && character < range.start.character) return false;
+    if (line === range.end.line && character > range.end.character) return false;
+    return true;
   }
 
   /**

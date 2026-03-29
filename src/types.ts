@@ -153,6 +153,18 @@ export interface DaemonConfig {
 }
 
 /**
+ * 项目状态信息
+ */
+export interface ProjectStatus {
+  /** 项目是否被重新加载（因 LRU 淘汰后重新访问） */
+  reloaded?: boolean;
+  /** 项目加载耗时（毫秒） */
+  loadTime?: number;
+  /** 被置换出去的项目路径 */
+  evictedProject?: string;
+}
+
+/**
  * 响应元数据 - 提供关于响应本身的附加信息
  */
 export interface ResponseMetadata {
@@ -164,6 +176,8 @@ export interface ResponseMetadata {
   totalSymbols?: number;
   /** 调用链深度限制 */
   depthLimit?: number;
+  /** 项目加载状态（多项目模式） */
+  projectStatus?: ProjectStatus;
 }
 
 export interface CLIResult<T> {

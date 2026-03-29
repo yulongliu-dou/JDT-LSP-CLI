@@ -449,6 +449,31 @@ jls refs src/App.java --symbol userService --json-compact
 |------|------|---------|
 | `compactMode` | 是否为紧凑模式输出 | 所有 `--json-compact` 命令 |
 | `childrenExcluded` | `symbols` 命令中 `children` 字段被省略 | `symbols`/`sym` 命令 |
+| `projectStatus` | 项目加载状态信息 | 守护进程模式，项目重新加载时 |
+
+#### projectStatus 字段（多项目模式）
+
+当使用守护进程模式且项目发生 LRU 淘汰后重新加载时，响应包含 `metadata.projectStatus`：
+
+```json
+{
+  "success": true,
+  "data": { ... },
+  "metadata": {
+    "projectStatus": {
+      "reloaded": true,
+      "loadTime": 5234,
+      "evictedProject": "/path/to/evicted-project"
+    }
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `reloaded` | 是否因 LRU 淘汰后重新加载 |
+| `loadTime` | 项目加载耗时（毫秒） |
+| `evictedProject` | 被置换出去的项目路径 |
 
 ### 错误响应结构
 
@@ -818,6 +843,7 @@ jls typedef [file] [line] [col] [options]
   --container <path>    父容器路径
   --signature <sig>     方法签名（区分重载）
   --index <n>           同名符号索引
+  --explain-empty       解释为什么返回空结果（调试用）
 ```
 
 **示例：**
@@ -827,6 +853,9 @@ jls typedef src/main/java/com/example/App.java 30 15
 
 # 符号定位：跳转到字段的类型定义
 jls typedef src/main/java/com/example/App.java --symbol userService
+
+# 解释空结果原因
+jls typedef src/main/java/com/example/Service.java --method getConfig --explain-empty
 ```
 
 **输出示例：**
@@ -846,7 +875,7 @@ jls typedef src/main/java/com/example/App.java --symbol userService
 }
 ```
 
-**⚠️ 限制说明：**
+**限制说明：**
 
 | 场景 | 结果 | 说明 |
 |------|------|------|
@@ -854,14 +883,20 @@ jls typedef src/main/java/com/example/App.java --symbol userService
 | 类字段 | ✅ 正常 | 字段有具体类型声明，可跳转到类型定义 |
 | 类方法返回值 | ✅ 正常 | 方法有具体实现，可解析返回类型 |
 
-**示例：**
-```bash
-# ❌ 接口方法 - 返回空（JDT LS 限制）
-jls typedef src/main/java/com/example/SqlSession.java --method getConfiguration
+使用 `--explain-empty` 选项可以获取空结果的详细原因：
 
-# ✅ 类字段 - 正常返回类型定义位置
-jls typedef src/main/java/com/example/DefaultSqlSession.java --symbol configuration
+```bash
+jls typedef src/main/java/com/example/SqlSession.java --method getConfiguration --explain-empty
 ```
+
+**返回的 reason 类型：**
+
+| reason | 说明 | suggestion |
+|--------|------|-----------|
+| `interface_method_no_implementation` | 接口方法无实现 | 建议使用 `definition` 命令跳转到方法声明 |
+| `primitive_type` | 基本类型无类定义 | 基本类型（int, void 等）没有类型定义位置 |
+| `no_symbol_at_position` | 指定位置无符号 | 检查行列号是否正确 |
+| `unknown` | 未知原因 | 可能是外部库无源码或符号未解析 |
 
 ## 位置参数说明
 

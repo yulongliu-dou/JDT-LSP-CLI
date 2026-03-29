@@ -1170,7 +1170,8 @@ program
 let typeDefCmd = program
   .command('type-definition [file] [line] [col]')
   .alias('typedef')
-  .description('Go to type definition (e.g., variable type -> class). Use --symbol for auto-positioning.');
+  .description('Go to type definition (e.g., variable type -> class). Use --symbol for auto-positioning.')
+  .option('--explain-empty', 'Explain why type definition is empty (for debugging)', false);
 typeDefCmd = addSymbolOptions(typeDefCmd);
 typeDefCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
     const opts = program.opts();
@@ -1184,6 +1185,7 @@ typeDefCmd.action(async (file: string, line: string | undefined, col: string | u
     }
     
     const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
+    const explainEmpty = cmdOptions.explainEmpty || false;
     
     await executeCommand(
       '/type-definition',
@@ -1192,13 +1194,14 @@ typeDefCmd.action(async (file: string, line: string | undefined, col: string | u
         file: filePath,
         line: resolvedLine,
         col: resolvedCol,
+        explainEmpty,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
       async () => {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          return await client.getTypeDefinition(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
+          return await client.getTypeDefinition(filePath, parseInt(resolvedLine), parseInt(resolvedCol), explainEmpty);
         } finally {
           if (client) await client.stop();
         }

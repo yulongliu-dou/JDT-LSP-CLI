@@ -15,7 +15,7 @@ import * as os from 'os';
 import { JdtLsClient, loadConfig } from './jdtClient';
 import { CLIOptions, CLIResult, SymbolInfo } from './types';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode } from './symbolResolver';
-import { ProjectPool } from './projectPool';
+import { ProjectPool, ProjectLoadEvent } from './projectPool';
 
 // 守护进程配置
 const DEFAULT_PORT = 9876;
@@ -28,6 +28,7 @@ let projectPool: ProjectPool | null = null;
 let client: JdtLsClient | null = null;
 let isReady = false;
 let currentProject: string | null = null;
+let lastLoadEvent: ProjectLoadEvent | undefined;
 
 /**
  * 日志输出（写入文件）
@@ -48,21 +49,26 @@ function log(message: string, ...args: any[]) {
 
 /**
  * 初始化 JDT LS 客户端（支持多项目模式）
+ * @returns 客户端和加载事件信息
  */
-async function initClient(projectPath: string, options: Partial<CLIOptions> = {}): Promise<JdtLsClient> {
+async function initClient(projectPath: string, options: Partial<CLIOptions> = {}): Promise<{ client: JdtLsClient; loadEvent?: ProjectLoadEvent }> {
   // 多项目模式：使用 ProjectPool
   if (projectPool) {
-    return await projectPool.getClient(projectPath, options);
+    const result = await projectPool.getClient(projectPath, options);
+    lastLoadEvent = result.loadEvent;
+    return result;
   }
   
   // 单项目模式（向后兼容）
   // 如果项目路径相同且已初始化，复用现有客户端
   if (client && isReady && currentProject === projectPath) {
     log('Reusing existing client for project:', projectPath);
-    return client;
+    lastLoadEvent = { type: 'reused', projectPath };
+    return { client, loadEvent: lastLoadEvent };
   }
   
   // 如果项目路径不同，先关闭旧客户端
+  const evictedProject = currentProject;
   if (client && currentProject !== projectPath) {
     log('Project changed, reinitializing client...');
     await client.stop();
@@ -86,11 +92,19 @@ async function initClient(projectPath: string, options: Partial<CLIOptions> = {}
     });
     
     currentProject = projectPath;
+    const startTime = Date.now();
     
     try {
       await client.start();
       isReady = true;
-      log('JDT LS client ready for project:', projectPath);
+      const loadTime = Date.now() - startTime;
+      lastLoadEvent = { 
+        type: evictedProject ? 'reloaded' : 'new', 
+        projectPath, 
+        loadTime,
+        evictedProject: evictedProject || undefined
+      };
+      log('JDT LS client ready for project:', projectPath, `(loaded in ${loadTime}ms)`);
     } catch (error: any) {
       log('Failed to initialize JDT LS:', error.message);
       client = null;
@@ -98,7 +112,7 @@ async function initClient(projectPath: string, options: Partial<CLIOptions> = {}
     }
   }
   
-  return client;
+  return { client, loadEvent: lastLoadEvent };
 }
 
 /**
@@ -313,7 +327,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     }
     
     // 初始化客户端（如果需要）
-    const activeClient = await initClient(project, options);
+    const { client: activeClient, loadEvent } = await initClient(project, options);
     
     if (!activeClient) {
       sendResponse(res, {
@@ -492,7 +506,8 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           return;
         }
         try {
-          const typeDefResult = await activeClient.getTypeDefinition(file, posResult.line, posResult.col);
+          const explainEmpty = body.explainEmpty || false;
+          const typeDefResult = await activeClient.getTypeDefinition(file, posResult.line, posResult.col, explainEmpty);
           // 确保返回统一格式
           result = typeDefResult || { locations: [], count: 0 };
         } catch (error: any) {
@@ -538,11 +553,25 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         return;
     }
     
-    sendResponse(res, {
+    // 构建响应，包含项目加载状态元数据
+    const response: CLIResult<any> = {
       success: true,
       data: result,
       elapsed: Date.now() - startTime,
-    });
+    };
+    
+    // 添加项目加载状态元数据（如果有）
+    if (loadEvent && (loadEvent.type === 'new' || loadEvent.type === 'reloaded')) {
+      response.metadata = {
+        projectStatus: {
+          reloaded: loadEvent.type === 'reloaded',
+          loadTime: loadEvent.loadTime,
+          evictedProject: loadEvent.evictedProject,
+        }
+      } as any;
+    }
+    
+    sendResponse(res, response);
     
   } catch (error: any) {
     log('Request error:', error.message);
