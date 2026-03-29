@@ -235,6 +235,22 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return;
     }
     
+    // 列出所有活跃项目（不需要 project 参数）
+    if (pathname === '/projects') {
+      const projects = projectPool ? projectPool.listProjects() : (currentProject ? [{
+        path: currentProject,
+        status: isReady ? 'ready' : 'initializing',
+        lastAccess: Date.now(),
+        priority: 0,
+      }] : []);
+      sendResponse(res, {
+        success: true,
+        data: { projects, count: projects.length },
+        elapsed: Date.now() - startTime,
+      });
+      return;
+    }
+    
     // 解析请求体
     const body = await parseBody(req);
     const { project, file, line, col, options = {} } = body;
@@ -432,17 +448,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         break;
       }
       
-      case '/projects': {
-        // 列出所有活跃项目
-        const projects = projectPool ? projectPool.listProjects() : (currentProject ? [{
-          path: currentProject,
-          status: isReady ? 'ready' : 'initializing',
-          lastAccess: Date.now(),
-          priority: 0,
-        }] : []);
-        result = { projects, count: projects.length };
-        break;
-      }
+      // /projects 端点已在上方提前处理（不需要 project 参数）
       
       case '/release': {
         // 释放指定项目
