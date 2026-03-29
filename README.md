@@ -4,6 +4,11 @@
 
 ## 版本更新日志
 
+### v1.6.5 (2026-03-29)
+- **BUG修复**: 修复 `type-definition`/`typedef` 命令 `--json-compact` 模式返回空对象的问题
+  - 添加 `typeDefinition` 和 `typedef` 到 `arrayFieldMap` 映射
+  - 现在正确识别 `{ locations: [...], count: N }` 包装结构
+
 ### v1.6.4 (2026-03-29)
 - **BUG修复**: 修复 `--json-compact` 模式下包装对象数据结构处理错误
   - 修复 `symbols`/`sym`、`references`/`refs`、`implementations`/`impl`、`find`/`f` 命令返回空对象的问题
@@ -421,6 +426,12 @@ jls refs src/App.java --symbol userService --json-compact
 | `type-definition` | `uri`, `range.start.line` |
 | `workspaceSymbols` | `name`, `kind`, `location.uri`, `location.range.start.line` |
 
+**⚠️ 注意事项：**
+
+1. **符号层级结构**：`symbols` 命令在 `--json-compact` 模式下只返回顶层符号（`name`, `kind`, `range.start.line`），**不包含 `children` 字段**。如需完整层级结构，请使用标准输出模式。
+
+2. **包装对象保留**：对于返回包装对象（如 `{ references: [...], count: N }`）的命令，`--json-compact` 会保留包装结构，仅对内部数组进行字段提取。
+
 ## 命令详解
 
 ### 1. call-hierarchy (ch) - 调用链分析
@@ -785,6 +796,23 @@ jls typedef src/main/java/com/example/App.java --symbol userService
   ],
   "elapsed": 300
 }
+```
+
+**⚠️ 限制说明：**
+
+| 场景 | 结果 | 说明 |
+|------|------|------|
+| 接口方法声明 | 空结果 | 接口方法没有具体实现，JDT LS 无法解析返回类型的定义位置 |
+| 类字段 | ✅ 正常 | 字段有具体类型声明，可跳转到类型定义 |
+| 类方法返回值 | ✅ 正常 | 方法有具体实现，可解析返回类型 |
+
+**示例：**
+```bash
+# ❌ 接口方法 - 返回空（JDT LS 限制）
+jls typedef src/main/java/com/example/SqlSession.java --method getConfiguration
+
+# ✅ 类字段 - 正常返回类型定义位置
+jls typedef src/main/java/com/example/DefaultSqlSession.java --symbol configuration
 ```
 
 ## 位置参数说明

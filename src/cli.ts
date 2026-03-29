@@ -73,6 +73,8 @@ function compactData(data: any, command: string): any {
       'workspaceSymbols': 'symbols',
       'find': 'symbols',
       'f': 'symbols',
+      'typeDefinition': 'locations',
+      'typedef': 'locations',
     };
     
     const arrayField = arrayFieldMap[command];
