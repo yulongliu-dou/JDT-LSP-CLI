@@ -35,7 +35,7 @@ const program = new Command();
 program
   .name('jls')
   .description('Java LSP CLI - Fast Java language features for AI agents (with daemon support)')
-  .version('1.6.4')
+  .version('1.6.7')
   .option('-p, --project <path>', 'Java project root directory', process.cwd())
   .option('--jdtls-path <path>', 'Path to eclipse.jdt.ls server')
   .option('--data-dir <path>', 'JDT LS data directory')
