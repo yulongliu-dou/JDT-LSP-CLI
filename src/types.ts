@@ -167,7 +167,9 @@ export interface CLIResult<T> {
 export interface CompactFieldConfig {
   definition: string[];
   references: string[];
+  refs: string[];  // 别名
   symbols: string[];
+  sym: string[];   // 别名
   callHierarchy: string[];
   hover: string[];
   implementations: string[];
@@ -181,7 +183,9 @@ export interface CompactFieldConfig {
 export const COMPACT_FIELDS: CompactFieldConfig = {
   definition: ['uri', 'range.start.line', 'range.start.character'],
   references: ['uri', 'range.start.line'],
+  refs: ['uri', 'range.start.line'],  // 别名支持
   symbols: ['name', 'kind', 'range.start.line'],
+  sym: ['name', 'kind', 'range.start.line'],  // 别名支持
   callHierarchy: ['entry', 'calls', 'totalMethods'],
   hover: ['contents'],
   implementations: ['uri', 'range.start.line'],

@@ -2,6 +2,13 @@
 
 > Java LSP 命令行工具 - 让 AI Agent 可以通过命令行调用 Java 语言服务能力
 
+## 版本更新日志
+
+### v1.6.2 (2026-03-29)
+- **BUG修复**: 修复 `--json-compact` 模式下 `sym` 和 `refs` 命令返回空数据的问题
+- 添加了命令别名的紧凑模式支持：`sym` → `symbols`，`refs` → `references`
+- 更新文档说明别名命令同样支持紧凑输出模式
+
 ## 简介
 
 JDT LSP CLI (`jls`) 是一个基于 Eclipse JDT Language Server 的命令行工具，将 Java IDE 的智能功能（如调用链分析、定义跳转、引用查找等）封装为命令行接口，使 AI Agent 可以通过简单的命令调用这些能力。
@@ -323,6 +330,10 @@ jls def src/App.java --symbol userService
 
 # 紧凑输出 - 只保留核心字段（uri + range.start）
 jls def src/App.java --symbol userService --json-compact
+
+# 别名命令同样支持紧凑模式（v1.6.2+）
+jls sym src/App.java --json-compact
+jls refs src/App.java --symbol userService --json-compact
 ```
 
 **对比：**
@@ -352,6 +363,38 @@ jls def src/App.java --symbol userService --json-compact
       }
     }
   ]
+}
+
+// hover 命令标准输出
+{
+  "success": true,
+  "data": {
+    "contents": [
+      {
+        "language": "java",
+        "value": "String TestHover.processOrder(String orderId, int quantity)"
+      },
+      "Process an order with the given parameters\n\n* **Parameters:**\n  * **orderId** the order identifier\n  * **quantity** the quantity ordered\n* **Returns:**\n  * processing result",
+      "Source: *[jdt-lsp-cli_e4aea93a](file:///E:/LSP_Scripy/jdt-lsp-cli/test-hover/TestHover.java#9)*"
+    ]
+  },
+  "elapsed": 800
+}
+
+// hover 命令紧凑输出 (--json-compact) - 与标准输出相同，因为只保留 contents 字段
+{
+  "success": true,
+  "data": {
+    "contents": [
+      {
+        "language": "java",
+        "value": "String TestHover.processOrder(String orderId, int quantity)"
+      },
+      "Process an order with the given parameters\n\n* **Parameters:**\n  * **orderId** the order identifier\n  * **quantity** the quantity ordered\n* **Returns:**\n  * processing result",
+      "Source: *[jdt-lsp-cli_e4aea93a](file:///E:/LSP_Scripy/jdt-lsp-cli/test-hover/TestHover.java#9)*"
+    ]
+  },
+  "elapsed": 800
 }
 ```
 
@@ -633,10 +676,14 @@ jls hover src/main/java/com/example/Outer.java --container "Outer.Inner" --metho
 {
   "success": true,
   "data": {
-    "contents": {
-      "kind": "markdown",
-      "value": "```java\npublic void processOrder(Order order)\n```\n\n处理订单业务逻辑\n\n@param order 订单对象"
-    }
+    "contents": [
+      {
+        "language": "java",
+        "value": "String TestHover.processOrder(String orderId, int quantity)"
+      },
+      "Process an order with the given parameters\n\n* **Parameters:**\n  * **orderId** the order identifier\n  * **quantity** the quantity ordered\n* **Returns:**\n  * processing result",
+      "Source: *[jdt-lsp-cli_e4aea93a](file:///E:/LSP_Scripy/jdt-lsp-cli/test-hover/TestHover.java#9)*"
+    ]
   },
   "elapsed": 800
 }
