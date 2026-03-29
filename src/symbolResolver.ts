@@ -93,16 +93,30 @@ export function normalizeSignature(signature: string, stripGenerics: boolean = t
 
 /**
  * 检查符号签名是否匹配查询（支持模糊匹配）
+ * 
+ * 支持两种查询格式:
+ * - 带括号: "(String, int)" - 用户友好的格式
+ * - 不带括号: "String, int" - 内部处理格式
  */
 export function matchSignature(symbolDetail: string | undefined, querySignature: string): boolean {
+  // 从 symbolDetail 提取签名（从 "methodName(String, int) : void" 提取 "String, int"）
+  const symbolSigFromDetail = extractSignature(symbolDetail);
+  
+  // 从 querySignature 提取签名（处理带括号和不带括号的情况）
+  // 如果用户传入 "(boolean)"，需要提取为 "boolean"
+  let querySigClean = querySignature;
+  if (querySignature.startsWith('(') && querySignature.endsWith(')')) {
+    querySigClean = querySignature.slice(1, -1);
+  }
+  
   // 精确签名匹配（保留泛型）
-  const symbolSigFull = normalizeSignature(extractSignature(symbolDetail), false);
-  const querySigFull = normalizeSignature(querySignature, false);
+  const symbolSigFull = normalizeSignature(symbolSigFromDetail, false);
+  const querySigFull = normalizeSignature(querySigClean, false);
   if (symbolSigFull === querySigFull) return true;
   
   // 模糊签名匹配（移除泛型）
-  const symbolSig = normalizeSignature(extractSignature(symbolDetail), true);
-  const querySig = normalizeSignature(querySignature, true);
+  const symbolSig = normalizeSignature(symbolSigFromDetail, true);
+  const querySig = normalizeSignature(querySigClean, true);
   if (symbolSig === querySig) return true;
   
   // 部分匹配（查询签名是符号签名的子串）
@@ -266,16 +280,56 @@ function findMatchingSymbols(
 }
 
 /**
+ * 从符号的 detail 字段提取返回类型
+ * JDT LS 返回的 detail 格式: "methodName(String orderId, int quantity) : void"
+ * 返回: "void"
+ */
+function extractReturnType(detail: string | undefined): string {
+  if (!detail) return '';
+  const match = detail.match(/:\s*(.+)$/);
+  return match ? match[1].trim() : '';
+}
+
+/**
  * 生成符号描述（用于错误提示）
+ * 
+ * 格式: "name [kind] - signature : returnType"
+ * 示例: "process [Method] - process(String, int) : boolean"
  */
 function formatSymbolDescription(symbol: SymbolInfo, path: string): string {
-  const signature = extractSimpleSignature(symbol.detail);
   const kindStr = symbol.kind ? ` [${symbol.kind}]` : '';
-  // 对于方法，显示简化签名
+  
+  // 对于方法，显示完整签名和返回类型
   if (symbol.kind === 'Method' || symbol.kind === 'Constructor') {
-    return `${path}${signature}${kindStr}`;
+    const signature = extractSimpleSignature(symbol.detail);
+    const returnType = extractReturnType(symbol.detail);
+    const returnStr = returnType ? ` : ${returnType}` : '';
+    // 使用 path（包含类名和方法名）而不是仅 symbol.name
+    return `${path}${kindStr} - ${path.split('.').pop()}${signature}${returnStr}`;
   }
+  
+  // 对于其他类型，只显示名称和类型
   return `${path}${kindStr}`;
+}
+
+/**
+ * 生成用于 overloadOptions 的符号描述（包含索引）
+ * 
+ * 格式: "[index] name [kind] - signature : returnType"
+ */
+function formatOverloadOption(symbol: SymbolInfo, path: string, index: number): string {
+  const kindStr = symbol.kind ? ` [${symbol.kind}]` : '';
+  const name = path.split('.').pop() || symbol.name;
+  
+  // 对于方法，显示完整签名和返回类型
+  if (symbol.kind === 'Method' || symbol.kind === 'Constructor') {
+    const signature = extractSimpleSignature(symbol.detail);
+    const returnType = extractReturnType(symbol.detail);
+    const returnStr = returnType ? ` : ${returnType}` : '';
+    return `[${index}] ${name}${kindStr} - ${name}${signature}${returnStr}`;
+  }
+  
+  return `[${index}] ${name}${kindStr}`;
 }
 
 /**
@@ -379,7 +433,7 @@ export function resolveSymbol(
           message: `Index ${query.index} out of range. Found ${matches.length} matches (0-${matches.length - 1}).`,
           suggestions: {
             overloadOptions: matches.map(({ symbol, path }, idx) => 
-              `[${idx}] ${formatSymbolDescription(symbol, path)}`
+              formatOverloadOption(symbol, path, idx)
             ),
           },
         },
@@ -407,7 +461,7 @@ export function resolveSymbol(
       message: `Found ${matches.length} symbols named '${query.name}'. Use --signature or --index to disambiguate.`,
       suggestions: {
         overloadOptions: matches.map(({ symbol, path }, idx) => 
-          `[${idx}] ${formatSymbolDescription(symbol, path)}`
+          formatOverloadOption(symbol, path, idx)
         ),
       },
     },

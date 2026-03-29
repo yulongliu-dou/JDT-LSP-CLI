@@ -698,6 +698,7 @@ export class JdtLsClient {
       return { locations, count: locations.length };
     } catch (error: any) {
       // 捕获 LSP 错误并返回友好格式
+      this.log('Type definition error:', error);
       return { 
         locations: [], 
         count: 0, 

@@ -302,9 +302,13 @@ async function resolveGlobalPosition(
   
   // 如果提供了签名，按签名过滤（用于区分重载方法）
   if (cmdOptions.signature && filtered.length > 0) {
-    const signatureFiltered = filtered.filter((s: any) => 
-      matchSignature(s.containerName || s.detail, cmdOptions.signature)
-    );
+    // workspace/symbol 返回的符号中，方法签名在 detail 字段
+    // 格式通常为: "methodName(paramType1, paramType2) : returnType"
+    const signatureFiltered = filtered.filter((s: any) => {
+      // 优先使用 detail 字段，它包含完整签名信息
+      const signatureSource = s.detail || s.containerName || '';
+      return matchSignature(signatureSource, cmdOptions.signature);
+    });
     
     // 如果签名过滤后有结果，使用过滤后的结果
     // 如果没有匹配，保留原结果并给出警告
@@ -399,6 +403,15 @@ async function getPosition(
   
   // 全局定位模式：不需要文件路径
   if (cmdOptions.global && isSymbolMode(cmdOptions)) {
+    // 验证 --kind 参数（全局定位必需）
+    if (!cmdOptions.kind) {
+      return {
+        success: false,
+        error: 'Missing required option: --kind. When using --global, you must specify --kind (e.g., Method, Class, Field, Interface).\n' +
+               'Example: jls def --global --symbol "openSession" --kind Method',
+        elapsed: 0,
+      };
+    }
     const methodName = cmdOptions.method || cmdOptions.symbol;
     return await resolveGlobalPosition(methodName, projectPath, cmdOptions, opts);
   }
@@ -450,6 +463,50 @@ async function getPosition(
       error: 'Position required: either provide <line> <col> or use --method/--symbol option',
       elapsed: 0,
     };
+  }
+  
+  // 验证行号和列号的有效性
+  const lineNum = parseInt(line, 10);
+  const colNum = parseInt(col, 10);
+  
+  if (isNaN(lineNum) || lineNum < 1) {
+    return {
+      success: false,
+      error: `Invalid line number: ${line}. Line number must be a positive integer.`,
+      elapsed: 0,
+    };
+  }
+  
+  if (isNaN(colNum) || colNum < 1) {
+    return {
+      success: false,
+      error: `Invalid column number: ${col}. Column number must be a positive integer.`,
+      elapsed: 0,
+    };
+  }
+  
+  // 检查行号是否超出文件范围
+  try {
+    const fileContent = fs.readFileSync(filePath, 'utf-8');
+    const lines = fileContent.split('\n');
+    if (lineNum > lines.length) {
+      return {
+        success: false,
+        error: `Line number ${lineNum} exceeds file length (${lines.length} lines).`,
+        elapsed: 0,
+      };
+    }
+    // 检查列号是否超出该行长度
+    const targetLine = lines[lineNum - 1];
+    if (colNum > targetLine.length + 1) {
+      return {
+        success: false,
+        error: `Column number ${colNum} exceeds line ${lineNum} length (${targetLine.length} characters).`,
+        elapsed: 0,
+      };
+    }
+  } catch (error: any) {
+    // 如果无法读取文件，继续执行（让后续处理报错）
   }
   
   return { filePath, line, col };
