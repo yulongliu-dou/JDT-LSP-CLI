@@ -25,7 +25,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
 import { JdtLsClient, loadConfig, generateConfigTemplate, CONFIG_FILE, DEFAULT_JVM_CONFIG } from './jdtClient';
-import { CLIResult, SymbolInfo, COMPACT_FIELDS } from './types';
+import { CLIResult, SymbolInfo, COMPACT_FIELDS, ResponseMetadata } from './types';
 import { startDaemon, getDaemonStatus, stopDaemon, DAEMON_PORT } from './daemon';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult, CommandType, matchSignature } from './symbolResolver';
 
@@ -127,9 +127,23 @@ function setNestedValue(obj: any, path: string, value: any): void {
 function outputResult<T>(result: CLIResult<T>, command?: string, compact?: boolean): void {
   let output = result;
   if (compact && result.data && command) {
-    output = { ...result, data: compactData(result.data, command) as T };
+    // 构建元数据
+    const metadata: ResponseMetadata = {
+      compactMode: true,
+    };
+    
+    // symbols/sym 命令特殊标记：children 被省略
+    if (command === 'symbols' || command === 'sym') {
+      metadata.childrenExcluded = true;
+    }
+    
+    output = { 
+      ...result, 
+      data: compactData(result.data, command) as T,
+      metadata
+    };
   }
-  console.log(JSON.stringify(output, compact ? null : null, compact ? 0 : 2));
+  console.log(JSON.stringify(output, null, compact ? 0 : 2));
   process.exit(result.success ? 0 : 1);
 }
 
@@ -407,10 +421,31 @@ async function getPosition(
   if (cmdOptions.global && isSymbolMode(cmdOptions)) {
     // 验证 --kind 参数（全局定位必需）
     if (!cmdOptions.kind) {
+      // 收集已提供的参数
+      const providedParams = [];
+      if (cmdOptions.method) providedParams.push('--method');
+      if (cmdOptions.symbol) providedParams.push('--symbol');
+      if (cmdOptions.global) providedParams.push('--global');
+      if (cmdOptions.signature) providedParams.push('--signature');
+      if (cmdOptions.index !== undefined) providedParams.push('--index');
+      
       return {
         success: false,
-        error: 'Missing required option: --kind. When using --global, you must specify --kind (e.g., Method, Class, Field, Interface).\n' +
-               'Example: jls def --global --symbol "openSession" --kind Method',
+        error: 'Missing required option: --kind. When using --global, you must specify --kind (e.g., Method, Class, Field, Interface).',
+        data: {
+          resolution_error: {
+            type: 'missing_required_param',
+            message: 'Missing required option: --kind',
+            requiredParams: ['--kind'],
+            providedParams,
+            usage: 'jls <command> --global --symbol <name> --kind <Method|Class|Field|Interface>',
+            examples: [
+              'jls def --global --symbol "ArrayList" --kind Class',
+              'jls def --global --symbol "openSession" --kind Method',
+              'jls refs --global --symbol "length" --kind Field'
+            ]
+          }
+        },
         elapsed: 0,
       };
     }

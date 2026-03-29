@@ -427,11 +427,58 @@ jls refs src/App.java --symbol userService --json-compact
 | `type-definition` | `uri`, `range.start.line` |
 | `workspaceSymbols` | `name`, `kind`, `location.uri`, `location.range.start.line` |
 
-**⚠️ 注意事项：**
+## 响应元数据
 
-1. **符号层级结构**：`symbols` 命令在 `--json-compact` 模式下只返回顶层符号（`name`, `kind`, `range.start.line`），**不包含 `children` 字段**。如需完整层级结构，请使用标准输出模式。
+所有命令的响应都包含 `metadata` 字段（compact 模式下），提供关于响应的附加信息：
 
-2. **包装对象保留**：对于返回包装对象（如 `{ references: [...], count: N }`）的命令，`--json-compact` 会保留包装结构，仅对内部数组进行字段提取。
+```json
+{
+  "success": true,
+  "data": { ... },
+  "elapsed": 1234,
+  "metadata": {
+    "compactMode": true,
+    "childrenExcluded": true
+  }
+}
+```
+
+### 元数据字段说明
+
+| 字段 | 说明 | 适用场景 |
+|------|------|---------|
+| `compactMode` | 是否为紧凑模式输出 | 所有 `--json-compact` 命令 |
+| `childrenExcluded` | `symbols` 命令中 `children` 字段被省略 | `symbols`/`sym` 命令 |
+
+### 错误响应结构
+
+当请求失败时，响应包含结构化的 `data.resolution_error`：
+
+```json
+{
+  "success": false,
+  "error": "Missing required option: --kind",
+  "data": {
+    "resolution_error": {
+      "type": "missing_required_param",
+      "message": "Missing required option: --kind",
+      "requiredParams": ["--kind"],
+      "providedParams": ["--symbol", "--global"],
+      "usage": "jls <command> --global --symbol <name> --kind <Method|Class|Field|Interface>",
+      "examples": [...]
+    }
+  }
+}
+```
+
+**错误类型：**
+
+| 类型 | 说明 | 建议字段 |
+|------|------|---------|
+| `missing_required_param` | 缺少必需参数 | `requiredParams`, `providedParams`, `usage`, `examples` |
+| `not_found` | 符号未找到 | `suggestions.similarNames`, `suggestions.availableSymbols` |
+| `ambiguous` | 多个匹配需要消歧 | `suggestions.overloadOptions` |
+| `invalid_query` | 查询参数无效 | 错误消息说明 |
 
 ## 命令详解
 
@@ -838,10 +885,10 @@ jls typedef src/main/java/com/example/DefaultSqlSession.java --symbol configurat
 
 使用 `--global` 选项可在不知道文件路径的情况下定位符号，特别适合大型项目中快速查找符号。
 
-⚠️ **重要限制说明**：
+**参数要求：**
 - `--global` 选项基于 `workspace/symbol` LSP 请求
 - JDT Language Server 主要支持**类级别**的全局符号搜索
-- **必须同时提供 `--symbol` 和 `--kind` 参数**
+- **必须同时提供 `--symbol` 和 `--kind` 参数**（参数缺失时会返回结构化错误提示）
 
 **✅ 正确用法：**
 ```bash
@@ -853,13 +900,6 @@ jls impl --global --symbol "Runnable" --kind interface
 
 # 全局搜索字段
 jls refs --global --symbol "length" --kind field
-```
-
-**❌ 错误用法（不受支持）：**
-```bash
-jls def --global --method "toString"          # ❌ 不支持单独使用 --method
-jls def --global --symbol "String"            # ❌ 缺少 --kind 参数
-jls def --global                             # ❌ 必须指定搜索内容
 ```
 
 **工作原理：**

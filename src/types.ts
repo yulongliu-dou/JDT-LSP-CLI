@@ -152,11 +152,27 @@ export interface DaemonConfig {
   projects?: Record<string, ProjectConfig>;  // 项目路径 -> 配置
 }
 
+/**
+ * 响应元数据 - 提供关于响应本身的附加信息
+ */
+export interface ResponseMetadata {
+  /** 是否为紧凑模式输出 */
+  compactMode?: boolean;
+  /** symbols 命令中 children 字段被省略 */
+  childrenExcluded?: boolean;
+  /** 总符号数量 */
+  totalSymbols?: number;
+  /** 调用链深度限制 */
+  depthLimit?: number;
+}
+
 export interface CLIResult<T> {
   success: boolean;
   data?: T;
   error?: string;
   elapsed?: number;
+  /** 响应元数据，提供关于响应的附加信息 */
+  metadata?: ResponseMetadata;
 }
 
 // ========== 紧凑输出配置 ==========
