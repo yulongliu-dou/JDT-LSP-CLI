@@ -45,6 +45,7 @@
   "dependencies": {
     "commander": "^14.0.0",
     "glob": "^13.0.0",
+    "nanospinner": "^1.2.2",
     "vscode-jsonrpc": "^8.2.0",
     "vscode-languageserver-protocol": "^3.17.5"
   },

@@ -25,8 +25,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
 import { JdtLsClient, loadConfig, generateConfigTemplate, CONFIG_FILE, DEFAULT_JVM_CONFIG } from './jdtClient';
-import { CLIResult, SymbolInfo, COMPACT_FIELDS, ResponseMetadata } from './types';
+import { CLIResult, SymbolInfo, COMPACT_FIELDS, ResponseMetadata, InitProgress } from './types';
+import { createSpinner } from 'nanospinner';
 import { startDaemon, getDaemonStatus, stopDaemon, DAEMON_PORT } from './daemon';
+import { fork, ChildProcess } from 'child_process';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult, CommandType, matchSignature } from './symbolResolver';
 
 const program = new Command();
@@ -702,7 +704,8 @@ daemonCmd
   .option('--port <port>', 'Daemon port', String(DAEMON_PORT))
   .option('--eager', 'Pre-initialize project immediately (eliminates lazy loading delay)')
   .option('--init-project <path>', 'Project path to pre-initialize with --eager')
-  .action((cmdOpts) => {
+  .option('--wait', 'Wait for initialization to complete and show progress spinner')
+  .action(async (cmdOpts) => {
     const opts = program.opts();
     const status = getDaemonStatus();
     if (status.running) {
@@ -719,8 +722,193 @@ daemonCmd
       jdtlsPath: opts.jdtlsPath,
     } : undefined;
     
-    startDaemon(parseInt(cmdOpts.port), eagerOptions);
+    // 如果使用了 --eager 和 --wait，使用 fork 启动子进程并显示进度
+    if (cmdOpts.eager && cmdOpts.wait && eagerOptions?.projectPath) {
+      await startDaemonWithFork(parseInt(cmdOpts.port), eagerOptions);
+    } else {
+      // 传统模式：直接启动（前台运行）
+      startDaemon(parseInt(cmdOpts.port), eagerOptions);
+    }
   });
+
+/**
+ * 使用 fork 启动守护进程子进程，显示进度后退出
+ */
+async function startDaemonWithFork(
+  port: number,
+  options: { eagerInit: boolean; projectPath: string; jdtlsPath?: string }
+): Promise<void> {
+  const spinner = createSpinner('启动守护进程...').start();
+  const startTime = Date.now();
+  
+  // 准备环境变量
+  const env = {
+    ...process.env,
+    JLS_DAEMON_PORT: String(port),
+    JLS_DAEMON_EAGER: 'true',
+    JLS_DAEMON_PROJECT: options.projectPath,
+    JLS_DAEMON_JDTLS: options.jdtlsPath || '',
+  };
+  
+  // fork 子进程运行守护进程
+  const daemonPath = path.join(__dirname, 'daemon-process.js');
+  const child: ChildProcess = fork(daemonPath, [], {
+    env,
+    detached: true, // 允许父进程退出后子进程继续运行
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  });
+  
+  return new Promise((resolve, reject) => {
+    let initCompleted = false;
+    
+    // 监听 IPC 消息
+    child.on('message', (msg: any) => {
+      if (msg.type === 'progress') {
+        const progress: InitProgress = msg.data;
+        const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+        spinner.update({ text: `${progress.message} (${progress.percent}%) - ${elapsedSec}s` });
+      } else if (msg.type === 'ready') {
+        initCompleted = true;
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        spinner.success({ text: `JDT LS 就绪! (${elapsed}s)` });
+        console.log(`项目: ${msg.data.projectPath}`);
+        if (msg.data.loadTime) {
+          console.log(`加载耗时: ${msg.data.loadTime}ms`);
+        }
+        console.log(`PID: ${msg.data.pid}`);
+        
+        // 断开 IPC 连接，让子进程独立运行
+        child.disconnect();
+        child.unref();
+        
+        resolve();
+      } else if (msg.type === 'error') {
+        initCompleted = true;
+        spinner.error({ text: `初始化失败: ${msg.data.error}` });
+        
+        // 终止子进程
+        child.kill();
+        reject(new Error(msg.data.error));
+      }
+    });
+    
+    // 处理子进程错误
+    child.on('error', (err) => {
+      if (!initCompleted) {
+        spinner.error({ text: '守护进程启动失败' });
+        reject(err);
+      }
+    });
+    
+    child.on('exit', (code) => {
+      if (!initCompleted && code !== 0) {
+        spinner.error({ text: `守护进程异常退出 (code: ${code})` });
+        reject(new Error(`Daemon exited with code ${code}`));
+      }
+    });
+    
+    // 超时处理
+    setTimeout(() => {
+      if (!initCompleted) {
+        spinner.error({ text: '初始化超时 (>120s)' });
+        child.kill();
+        reject(new Error('Initialization timeout'));
+      }
+    }, 120000);
+  });
+}
+
+/**
+ * 等待初始化完成并显示 spinner
+ */
+async function waitForInitWithSpinner(port: number, projectPath: string): Promise<void> {
+  const spinner = createSpinner('初始化 JDT LS...').start();
+  const startTime = Date.now();
+  const maxWaitTime = 120000; // 最大等待 120 秒
+  const checkInterval = 500; // 每 500ms 检查一次
+  
+  const checkHealth = (): Promise<{ success: boolean; data?: any }> => {
+    return new Promise((resolve) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port,
+        path: '/health',
+        method: 'GET',
+        timeout: 1000,
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve({ success: false });
+          }
+        });
+      });
+      req.on('error', () => resolve({ success: false }));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve({ success: false });
+      });
+      req.end();
+    });
+  };
+  
+  // 等待守护进程 HTTP 服务启动
+  let daemonReady = false;
+  for (let i = 0; i < 50; i++) { // 最多等待 25 秒
+    const result = await checkHealth();
+    if (result.success) {
+      daemonReady = true;
+      break;
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  
+  if (!daemonReady) {
+    spinner.error({ text: '守护进程启动超时' });
+    return;
+  }
+  
+  // 轮询进度直到就绪
+  while (Date.now() - startTime < maxWaitTime) {
+    const result = await checkHealth();
+    
+    if (!result.success) {
+      spinner.error({ text: '无法获取守护进程状态' });
+      return;
+    }
+    
+    const data = result.data;
+    const progress: InitProgress | undefined = data.progress;
+    
+    if (data.status === 'ready') {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      spinner.success({ text: `JDT LS 就绪! (${elapsed}s)` });
+      console.log(`项目: ${projectPath}`);
+      if (data.project?.loadTime) {
+        console.log(`加载耗时: ${data.project.loadTime}ms`);
+      }
+      return;
+    }
+    
+    if (data.status === 'error') {
+      spinner.error({ text: `初始化失败: ${progress?.error || '未知错误'}` });
+      return;
+    }
+    
+    // 更新 spinner 文本
+    if (progress) {
+      const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+      spinner.update({ text: `${progress.message} (${progress.percent}%) - ${elapsedSec}s` });
+    }
+    
+    await new Promise(r => setTimeout(r, checkInterval));
+  }
+  
+  spinner.error({ text: '初始化超时 (>120s)' });
+}
 
 daemonCmd
   .command('stop')
@@ -807,9 +995,13 @@ daemonCmd
     try {
       const result = await sendDaemonRequest('/status', {});
       if (result.success && result.data) {
-        console.log(`Project: ${result.data.project || 'none'}`);
+        const projectPath = result.data.project?.path || result.data.project || 'none';
+        console.log(`Project: ${projectPath}`);
         console.log(`Status: ${result.data.status}`);
         console.log(`Uptime: ${Math.floor(result.data.uptime)}s`);
+        if (result.data.version) {
+          console.log(`Version: ${result.data.version}`);
+        }
       }
     } catch (e) {
       // ignore

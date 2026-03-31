@@ -91,6 +91,7 @@ export class JdtLsClient {
   private openedFiles = new Set<string>();
   private javaExecutable: string = 'java';
   private jvmConfig: JvmConfig;
+  private progressCallback?: (stage: string, percent: number, message: string) => void;
 
   constructor(options: CLIOptions, jvmConfig?: Partial<JvmConfig>) {
     this.options = {
@@ -101,6 +102,22 @@ export class JdtLsClient {
     // 合并 JVM 配置：默认值 < 配置文件 < 构造参数
     const config = loadConfig();
     this.jvmConfig = { ...config.jvm, ...jvmConfig };
+  }
+
+  /**
+   * 设置进度回调
+   */
+  setProgressCallback(callback: (stage: string, percent: number, message: string) => void): void {
+    this.progressCallback = callback;
+  }
+
+  /**
+   * 报告进度
+   */
+  private reportProgress(stage: string, percent: number, message: string): void {
+    if (this.progressCallback) {
+      this.progressCallback(stage, percent, message);
+    }
   }
 
   /**
@@ -406,6 +423,7 @@ export class JdtLsClient {
    */
   private async waitForIndexing(): Promise<void> {
     this.log('Waiting for project indexing...');
+    this.reportProgress('indexing', 40, '等待项目索引完成...');
     
     // 监听 JDT LS 的进度通知来判断索引是否完成
     // 但由于某些版本的 JDT LS 不发送进度通知，我们使用渐进式等待策略
@@ -426,8 +444,10 @@ export class JdtLsClient {
     
     // 渐进式等待：先等待基础初始化
     await new Promise(resolve => setTimeout(resolve, 3000));
+    this.reportProgress('indexing', 50, '正在索引项目文件...');
     
     // 然后通过尝试一个简单操作来验证服务是否就绪
+    let checkCount = 0;
     while (Date.now() - startTime < maxWaitTime && !indexingComplete) {
       try {
         // 尝试发送一个简单请求来测试服务是否响应
@@ -436,14 +456,20 @@ export class JdtLsClient {
           new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
         ]);
         this.log('JDT LS is responding, indexing assumed ready');
+        this.reportProgress('indexing', 90, '索引完成，准备就绪...');
         break;
       } catch (e) {
+        checkCount++;
+        const percent = Math.min(50 + checkCount * 5, 85); // 50% -> 85%
+        this.reportProgress('indexing', percent, '正在索引项目文件...');
         this.log('JDT LS not ready yet, waiting...');
         await new Promise(resolve => setTimeout(resolve, checkInterval));
       }
     }
     
-    this.log('Indexing wait complete after', Date.now() - startTime, 'ms');
+    const elapsed = Date.now() - startTime;
+    this.log('Indexing wait complete after', elapsed, 'ms');
+    this.reportProgress('indexing', 95, '索引完成，最终检查...');
   }
 
   /**

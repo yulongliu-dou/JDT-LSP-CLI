@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { JdtLsClient, loadConfig } from './jdtClient';
-import { CLIOptions, CLIResult, SymbolInfo } from './types';
+import { CLIOptions, CLIResult, SymbolInfo, InitProgress, InitStage, ProjectLoadState } from './types';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode } from './symbolResolver';
 import { ProjectPool, ProjectLoadEvent } from './projectPool';
 
@@ -29,6 +29,38 @@ let client: JdtLsClient | null = null;
 let isReady = false;
 let currentProject: string | null = null;
 let lastLoadEvent: ProjectLoadEvent | undefined;
+
+// 初始化进度追踪
+let initProgress: InitProgress = {
+  stage: 'idle',
+  percent: 0,
+  message: '守护进程空闲',
+  elapsedMs: 0,
+};
+let initStartTime = 0;
+
+/**
+ * 更新初始化进度
+ */
+function updateProgress(stage: InitStage, percent: number, message: string, error?: string) {
+  initProgress = {
+    stage,
+    percent,
+    message,
+    elapsedMs: initStartTime ? Date.now() - initStartTime : 0,
+    projectPath: currentProject || undefined,
+    error,
+  };
+  log(`[Progress] ${stage} (${percent}%): ${message}`);
+  
+  // 通过 IPC 通知父进程（如果是子进程模式）
+  if (process.send) {
+    process.send({
+      type: 'progress',
+      data: initProgress,
+    });
+  }
+}
 
 /**
  * 日志输出（写入文件）
@@ -54,8 +86,12 @@ function log(message: string, ...args: any[]) {
 async function initClient(projectPath: string, options: Partial<CLIOptions> = {}): Promise<{ client: JdtLsClient; loadEvent?: ProjectLoadEvent }> {
   // 多项目模式：使用 ProjectPool
   if (projectPool) {
+    updateProgress('starting', 0, '开始初始化项目...');
     const result = await projectPool.getClient(projectPath, options);
     lastLoadEvent = result.loadEvent;
+    if (result.loadEvent?.type === 'new' || result.loadEvent?.type === 'reloaded') {
+      updateProgress('ready', 100, '项目就绪', undefined);
+    }
     return result;
   }
   
@@ -71,6 +107,7 @@ async function initClient(projectPath: string, options: Partial<CLIOptions> = {}
   const evictedProject = currentProject;
   if (client && currentProject !== projectPath) {
     log('Project changed, reinitializing client...');
+    updateProgress('starting', 0, '切换项目，重新初始化...');
     await client.stop();
     client = null;
     isReady = false;
@@ -78,10 +115,14 @@ async function initClient(projectPath: string, options: Partial<CLIOptions> = {}
   
   if (!client) {
     log('Initializing JDT LS client for project:', projectPath);
+    initStartTime = Date.now();
+    updateProgress('starting', 5, '准备启动 JDT LS...');
     
     // 使用固定的数据目录，便于复用索引缓存
     const dataDir = path.join(os.homedir(), '.jdt-lsp-cli', 'data', 
       Buffer.from(projectPath).toString('base64').replace(/[/+=]/g, '_').slice(0, 50));
+    
+    updateProgress('jdt-launching', 15, '启动 JDT Language Server...');
     
     client = new JdtLsClient({
       projectPath,
@@ -92,20 +133,29 @@ async function initClient(projectPath: string, options: Partial<CLIOptions> = {}
     });
     
     currentProject = projectPath;
-    const startTime = Date.now();
+    
+    // 设置进度回调
+    client.setProgressCallback((stage: string, percent: number, message: string) => {
+      const mappedStage: InitStage = stage === 'initializing' ? 'initializing' : 
+                                     stage === 'indexing' ? 'indexing' : 'starting';
+      updateProgress(mappedStage, percent, message);
+    });
     
     try {
+      updateProgress('initializing', 30, '初始化 LSP 连接...');
       await client.start();
       isReady = true;
-      const loadTime = Date.now() - startTime;
+      const loadTime = Date.now() - initStartTime;
       lastLoadEvent = { 
         type: evictedProject ? 'reloaded' : 'new', 
         projectPath, 
         loadTime,
         evictedProject: evictedProject || undefined
       };
+      updateProgress('ready', 100, 'JDT LS 就绪', undefined);
       log('JDT LS client ready for project:', projectPath, `(loaded in ${loadTime}ms)`);
     } catch (error: any) {
+      updateProgress('error', 0, '初始化失败', error.message);
       log('Failed to initialize JDT LS:', error.message);
       client = null;
       throw error;
@@ -261,13 +311,47 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   try {
     // 健康检查
     if (pathname === '/health' || pathname === '/status') {
+      // 构建项目状态
+      const projectState: ProjectLoadState | undefined = currentProject ? {
+        path: currentProject,
+        status: isReady ? 'ready' : initProgress.stage === 'error' ? 'error' : 'loading',
+        loadTime: lastLoadEvent?.loadTime,
+        progress: isReady ? undefined : initProgress,
+        lastAccess: Date.now(),
+        priority: 0,
+      } : undefined;
+
+      // 确定整体状态
+      let overallStatus: 'idle' | 'starting' | 'initializing' | 'indexing' | 'ready' | 'error';
+      if (!currentProject) {
+        overallStatus = 'idle';
+      } else if (isReady) {
+        overallStatus = 'ready';
+      } else if (initProgress.stage === 'error') {
+        overallStatus = 'error';
+      } else {
+        // 映射阶段到整体状态
+        const stageMap: Record<InitStage, typeof overallStatus> = {
+          'idle': 'idle',
+          'starting': 'starting',
+          'jdt-launching': 'starting',
+          'initializing': 'initializing',
+          'indexing': 'indexing',
+          'ready': 'ready',
+          'error': 'error',
+        };
+        overallStatus = stageMap[initProgress.stage];
+      }
+
       sendResponse(res, {
         success: true,
         data: {
-          status: isReady ? 'ready' : 'initializing',
-          project: currentProject,
+          status: overallStatus,
+          progress: initProgress.stage !== 'idle' && initProgress.stage !== 'ready' ? initProgress : undefined,
+          project: projectState,
           uptime: process.uptime(),
           pid: process.pid,
+          version: '1.6.7',
         },
         elapsed: Date.now() - startTime,
       });
@@ -640,10 +724,33 @@ export function startDaemon(port: number = DEFAULT_PORT, options?: { eagerInit?:
         await initClient(options.projectPath, { jdtlsPath: options.jdtlsPath });
         log('Project pre-initialized successfully');
         console.log('Project ready!');
+        
+        // 通过 IPC 通知父进程初始化完成
+        if (process.send) {
+          process.send({
+            type: 'ready',
+            data: {
+              projectPath: options.projectPath,
+              loadTime: lastLoadEvent?.loadTime,
+              pid: process.pid,
+            },
+          });
+        }
       } catch (error: any) {
         log('Eager initialization failed:', error.message);
         console.error('Warning: Eager initialization failed:', error.message);
         console.error('Project will be initialized on first request.');
+        
+        // 通过 IPC 通知父进程初始化失败
+        if (process.send) {
+          process.send({
+            type: 'error',
+            data: {
+              error: error.message,
+              projectPath: options.projectPath,
+            },
+          });
+        }
       }
     }
   });

@@ -164,6 +164,49 @@ export interface ProjectStatus {
   evictedProject?: string;
 }
 
+// ========== 守护进程初始化进度 ==========
+
+/**
+ * 初始化阶段
+ */
+export type InitStage = 'idle' | 'starting' | 'jdt-launching' | 'initializing' | 'indexing' | 'ready' | 'error';
+
+/**
+ * 初始化进度信息
+ */
+export interface InitProgress {
+  /** 当前阶段 */
+  stage: InitStage;
+  /** 进度百分比 0-100 */
+  percent: number;
+  /** 状态消息 */
+  message: string;
+  /** 已耗时（毫秒） */
+  elapsedMs: number;
+  /** 项目路径 */
+  projectPath?: string;
+  /** 错误信息（如果 stage 为 error） */
+  error?: string;
+}
+
+/**
+ * 项目加载状态
+ */
+export interface ProjectLoadState {
+  /** 项目路径 */
+  path: string;
+  /** 加载状态 */
+  status: 'loading' | 'ready' | 'error' | 'not_loaded';
+  /** 加载耗时（毫秒，仅 ready 状态） */
+  loadTime?: number;
+  /** 当前进度（仅 loading 状态） */
+  progress?: InitProgress;
+  /** 最后访问时间 */
+  lastAccess: number;
+  /** 优先级 */
+  priority: number;
+}
+
 /**
  * 响应元数据 - 提供关于响应本身的附加信息
  */
