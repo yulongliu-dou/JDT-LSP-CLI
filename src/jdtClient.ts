@@ -338,6 +338,7 @@ export class JdtLsClient {
     this.process = spawn(this.javaExecutable, javaArgs, {
       cwd: this.options.projectPath,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true, // Windows: 隐藏 Java 进程的控制台窗口
     });
 
     // 错误输出

@@ -28,7 +28,7 @@ import { JdtLsClient, loadConfig, generateConfigTemplate, CONFIG_FILE, DEFAULT_J
 import { CLIResult, SymbolInfo, COMPACT_FIELDS, ResponseMetadata, InitProgress } from './types';
 import { createSpinner } from 'nanospinner';
 import { startDaemon, getDaemonStatus, stopDaemon, DAEMON_PORT } from './daemon';
-import { fork, ChildProcess } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult, CommandType, matchSignature } from './symbolResolver';
 
 const program = new Command();
@@ -724,7 +724,12 @@ daemonCmd
     
     // 如果使用了 --eager 和 --wait，使用 fork 启动子进程并显示进度
     if (cmdOpts.eager && cmdOpts.wait && eagerOptions?.projectPath) {
-      await startDaemonWithFork(parseInt(cmdOpts.port), eagerOptions);
+      try {
+        await startDaemonWithFork(parseInt(cmdOpts.port), eagerOptions);
+        process.exit(0); // 显式退出，避免事件循环阻塞
+      } catch (err) {
+        process.exit(1);
+      }
     } else {
       // 传统模式：直接启动（前台运行）
       startDaemon(parseInt(cmdOpts.port), eagerOptions);
@@ -732,7 +737,7 @@ daemonCmd
   });
 
 /**
- * 使用 fork 启动守护进程子进程，显示进度后退出
+ * 使用 spawn 启动守护进程子进程，显示进度后退出
  */
 async function startDaemonWithFork(
   port: number,
@@ -750,12 +755,13 @@ async function startDaemonWithFork(
     JLS_DAEMON_JDTLS: options.jdtlsPath || '',
   };
   
-  // fork 子进程运行守护进程
+  // spawn 子进程运行守护进程
   const daemonPath = path.join(__dirname, 'daemon-process.js');
-  const child: ChildProcess = fork(daemonPath, [], {
+  const child: ChildProcess = spawn(process.execPath, [daemonPath], {
     env,
     detached: true, // 允许父进程退出后子进程继续运行
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    windowsHide: true, // Windows: 隐藏子进程窗口
   });
   
   return new Promise((resolve, reject) => {
