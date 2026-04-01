@@ -1,6 +1,6 @@
 {
   "name": "jdt-lsp-cli",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "description": "CLI tool for Java LSP operations, enabling AI agents to call Java language features from the command line",
   "main": "dist/index.js",
   "bin": {
