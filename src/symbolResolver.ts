@@ -10,7 +10,7 @@
  * - 智能位置选择（针对不同命令优化）
  */
 
-import { SymbolQuery, ResolvedPosition, SymbolResolutionError, SymbolInfo } from './types';
+import { SymbolQuery, ResolvedPosition, SymbolResolutionError, SymbolInfo } from './core/types';
 
 /**
  * 符号解析结果（成功或失败）

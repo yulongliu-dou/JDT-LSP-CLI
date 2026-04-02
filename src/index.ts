@@ -38,4 +38,4 @@
 
 export { JdtLsClient, loadConfig, generateConfigTemplate, CONFIG_DIR, CONFIG_FILE, DEFAULT_JVM_CONFIG } from './jdtClient';
 export { startDaemon, getDaemonStatus, stopDaemon, DAEMON_PORT, DAEMON_PID_FILE } from './daemon';
-export * from './types';
+export * from './core/types';

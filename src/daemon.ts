@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { JdtLsClient, loadConfig } from './jdtClient';
-import { CLIOptions, CLIResult, SymbolInfo, InitProgress, InitStage, ProjectLoadState } from './types';
+import { CLIOptions, CLIResult, SymbolInfo, InitProgress, InitStage, ProjectLoadState } from './core/types';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode } from './symbolResolver';
 import { ProjectPool, ProjectLoadEvent } from './projectPool';
 

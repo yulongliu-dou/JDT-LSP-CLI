@@ -221,6 +221,15 @@ export interface ResponseMetadata {
   depthLimit?: number;
   /** 项目加载状态（多项目模式） */
   projectStatus?: ProjectStatus;
+  /** 项目路径诊断信息（当路径不匹配时） */
+  diagnosis?: {
+    daemon_project: string | null;
+    requested_project: string;
+    file_path: string | null;
+    suggested_project: string | null;
+    confidence: 'low' | 'medium' | 'high';
+    reason: string;
+  };
 }
 
 export interface CLIResult<T> {
@@ -230,6 +239,19 @@ export interface CLIResult<T> {
   elapsed?: number;
   /** 响应元数据，提供关于响应的附加信息 */
   metadata?: ResponseMetadata;
+  /** 诊断信息（项目路径不匹配时） */
+  diagnosis?: {
+    daemon_project: string | null;
+    requested_project: string;
+    file_path: string | null;
+    suggested_project: string | null;
+    confidence: 'low' | 'medium' | 'high';
+    reason: string;
+  };
+  /** 修复建议 */
+  suggestion?: string;
+  /** 修复命令 */
+  fix_command?: string | null;
 }
 
 // ========== 紧凑输出配置 ==========

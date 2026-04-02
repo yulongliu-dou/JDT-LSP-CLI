@@ -132,7 +132,7 @@ export class JdtLsClient {
   /**
    * 获取定义
    */
-  async getDefinition(filePath: string, line: number, col: number) {
+  async getDefinition(filePath: string, line: number, col: number): Promise<any> {
     await this.openDocument(filePath);
     try {
       return await this.connectionManager.getDefinition(filePath, line, col);
@@ -144,10 +144,10 @@ export class JdtLsClient {
   /**
    * 获取引用
    */
-  async getReferences(filePath: string, line: number, col: number, includeDeclaration: boolean) {
+  async getReferences(filePath: string, line: number, col: number, includeDeclaration: boolean): Promise<any[]> {
     await this.openDocument(filePath);
     try {
-      return await this.connectionManager.getReferences(filePath, line, col, includeDeclaration);
+      return await this.connectionManager.getReferences(filePath, line, col, includeDeclaration) as any[];
     } finally {
       await this.closeDocument(filePath);
     }
@@ -156,10 +156,10 @@ export class JdtLsClient {
   /**
    * 获取文档符号
    */
-  async getDocumentSymbols(filePath: string) {
+  async getDocumentSymbols(filePath: string): Promise<any[]> {
     await this.openDocument(filePath);
     try {
-      return await this.connectionManager.getDocumentSymbols(filePath);
+      return await this.connectionManager.getDocumentSymbols(filePath) as any[];
     } finally {
       await this.closeDocument(filePath);
     }
@@ -168,7 +168,7 @@ export class JdtLsClient {
   /**
    * 获取 Hover 信息
    */
-  async getHover(filePath: string, line: number, col: number) {
+  async getHover(filePath: string, line: number, col: number): Promise<any> {
     await this.openDocument(filePath);
     try {
       return await this.connectionManager.getHover(filePath, line, col);
@@ -180,10 +180,10 @@ export class JdtLsClient {
   /**
    * 获取实现
    */
-  async getImplementations(filePath: string, line: number, col: number) {
+  async getImplementations(filePath: string, line: number, col: number): Promise<any[]> {
     await this.openDocument(filePath);
     try {
-      return await this.connectionManager.getImplementations(filePath, line, col);
+      return await this.connectionManager.getImplementations(filePath, line, col) as any[];
     } finally {
       await this.closeDocument(filePath);
     }
@@ -192,7 +192,7 @@ export class JdtLsClient {
   /**
    * 获取类型定义
    */
-  async getTypeDefinition(filePath: string, line: number, col: number, explainEmpty?: boolean) {
+  async getTypeDefinition(filePath: string, line: number, col: number, explainEmpty?: boolean): Promise<any> {
     await this.openDocument(filePath);
     try {
       const result = await this.connectionManager.getTypeDefinition(filePath, line, col);
@@ -214,17 +214,17 @@ export class JdtLsClient {
   /**
    * 获取工作区符号
    */
-  async getWorkspaceSymbols(query: string, limit?: number) {
-    return await this.connectionManager.getWorkspaceSymbols(query, limit);
+  async getWorkspaceSymbols(query: string, limit?: number): Promise<any[]> {
+    return await this.connectionManager.getWorkspaceSymbols(query, limit) as any[];
   }
 
   /**
    * 准备调用层级
    */
-  async prepareCallHierarchy(filePath: string, line: number, col: number) {
+  async prepareCallHierarchy(filePath: string, line: number, col: number): Promise<any[]> {
     await this.openDocument(filePath);
     try {
-      return await this.connectionManager.prepareCallHierarchy(filePath, line, col);
+      return await this.connectionManager.prepareCallHierarchy(filePath, line, col) as any[];
     } finally {
       await this.closeDocument(filePath);
     }
@@ -233,15 +233,15 @@ export class JdtLsClient {
   /**
    * 获取 incoming calls
    */
-  async getIncomingCalls(item: any) {
-    return await this.connectionManager.getIncomingCalls(item);
+  async getIncomingCalls(item: any): Promise<any[]> {
+    return await this.connectionManager.getIncomingCalls(item) as any[];
   }
 
   /**
    * 获取 outgoing calls
    */
-  async getOutgoingCalls(item: any) {
-    return await this.connectionManager.getOutgoingCalls(item);
+  async getOutgoingCalls(item: any): Promise<any[]> {
+    return await this.connectionManager.getOutgoingCalls(item) as any[];
   }
 
   /**

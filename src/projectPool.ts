@@ -11,7 +11,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import { JdtLsClient } from './jdtClient';
-import { CLIOptions, DaemonConfig, ProjectConfig } from './types';
+import { CLIOptions, DaemonConfig, ProjectConfig } from './core/types';
 
 /**
  * 项目加载事件类型
