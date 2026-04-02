@@ -33,58 +33,6 @@ program
 // ========== 新架构：注册所有命令 ==========
 registerAllCommands(program);
 
-// ========== 旧代码：已注释保留但不执行 ==========
-// 以下代码已迁移到 cli/commands/ 和 cli/utils/ 目录
-// 为安全起见暂时保留在此，确认新架构稳定后可删除
-
-/*
-// ========== 守护进程管理命令（已迁移到 cli/commands/daemon.ts）==========
-const daemonCmd = program
-  .command('daemon')
-  .description('Manage the JDT LSP daemon process');
-
-daemonCmd
-  .command('start')
-  .description('Start the daemon process')
-  .option('--port <port>', 'Daemon port', String(DAEMON_PORT))
-  .option('--eager', 'Pre-initialize project immediately (eliminates lazy loading delay)')
-  .option('--init-project <path>', 'Project path to pre-initialize with --eager')
-  .option('--wait', 'Wait for initialization to complete and show progress spinner')
-  .action(async (cmdOpts) => {
-    const opts = program.opts();
-    const status = getDaemonStatus();
-    if (status.running) {
-      console.log(`Daemon already running with PID ${status.pid}`);
-      process.exit(0);
-    }
-    
-    console.log('Starting JDT LSP daemon...');
-    
-    // 支持预初始化
-    const eagerOptions = cmdOpts.eager ? {
-      eagerInit: true,
-      projectPath: cmdOpts.initProject || opts.project,
-      jdtlsPath: opts.jdtlsPath,
-    } : undefined;
-    
-    // 如果使用了 --eager 和 --wait，使用 fork 启动子进程并显示进度
-    if (cmdOpts.eager && cmdOpts.wait && eagerOptions?.projectPath) {
-      try {
-        await startDaemonWithFork(parseInt(cmdOpts.port), eagerOptions);
-        process.exit(0); // 显式退出，避免事件循环阻塞
-      } catch (err) {
-        process.exit(1);
-      }
-    } else {
-      // 传统模式：直接启动（前台运行）
-      startDaemon(parseInt(cmdOpts.port), eagerOptions);
-    }
-  });
-
-// ... [其余旧代码都以注释形式保留在这里]
-
-*/
-
 // 解析命令行参数
 program.parse(process.argv);
 

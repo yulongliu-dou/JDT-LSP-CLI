@@ -189,7 +189,7 @@ async function startDaemonWithFork(
     JLS_DAEMON_JDTLS: options.jdtlsPath || '',
   };
   
-  const daemonPath = path.join(__dirname, 'daemon-process.js');
+  const daemonPath = path.join(__dirname, '..', '..', 'daemon-process.js');
   const child: ChildProcess = spawn(process.execPath, [daemonPath], {
     env,
     detached: true,
