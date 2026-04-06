@@ -2,6 +2,10 @@
  * 核心常量定义
  */
 
+// ========== 版本信息 ==========
+// 注意：版本号只需在此处修改，会自动同步到CLI和Daemon
+export const PACKAGE_VERSION = '1.7.1';
+
 // 守护进程默认配置
 export const DEFAULT_DAEMON_PORT = 9876;
 

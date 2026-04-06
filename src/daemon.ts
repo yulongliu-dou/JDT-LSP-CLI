@@ -14,6 +14,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { JdtLsClient, loadConfig } from './jdtClient';
 import { CLIOptions, CLIResult, SymbolInfo, InitProgress, InitStage, ProjectLoadState } from './core/types';
+import { PACKAGE_VERSION } from './core/constants';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode } from './symbolResolver';
 import { ProjectPool, ProjectLoadEvent } from './projectPool';
 import { stringToSymbolKind, symbolKindToString } from './core/utils/symbolKind';
@@ -360,7 +361,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           project: projectState,
           uptime: process.uptime(),
           pid: process.pid,
-          version: '1.7.1',
+          version: PACKAGE_VERSION,
         },
         elapsed: Date.now() - startTime,
       });

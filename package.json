@@ -11,7 +11,8 @@
     "watch": "tsc -w",
     "start": "node dist/cli.js",
     "link": "npm run build && npm link",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "update-version": "node scripts/update-version.js"
   },
   "keywords": [
     "java",
