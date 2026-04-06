@@ -8,6 +8,7 @@ import { JdtLsClient } from '../../jdtClient';
 import { SymbolInfo, CLIResult } from '../../core/types';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult } from '../../symbolResolver';
 import { sendDaemonRequest } from './daemonRequest';
+import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
 
 /**
  * 解析文件路径（确保是绝对路径）
@@ -158,12 +159,13 @@ export async function resolveGlobalPosition(
     }
   }
   
-  // 过滤符号类型（如果指定）
-  const kindFilter = (cmdOptions.kind || 'Method').toLowerCase();
+  // 过滤符号类型（如果指定）- 将字符串转换为数字进行比较
+  const kindFilter = cmdOptions.kind || 'Method';
+  const kindNumber = stringToSymbolKind(kindFilter);
   
   // 先按 kind 过滤，然后精确匹配名称
   const sameKindSymbols = symbols.filter((s: any) => 
-    s.kind?.toLowerCase() === kindFilter
+    s.kind === kindNumber
   );
   
   // 精确匹配名称

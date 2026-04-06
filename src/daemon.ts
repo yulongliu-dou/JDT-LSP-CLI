@@ -16,6 +16,7 @@ import { JdtLsClient, loadConfig } from './jdtClient';
 import { CLIOptions, CLIResult, SymbolInfo, InitProgress, InitStage, ProjectLoadState } from './core/types';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode } from './symbolResolver';
 import { ProjectPool, ProjectLoadEvent } from './projectPool';
+import { stringToSymbolKind, symbolKindToString } from './core/utils/symbolKind';
 
 // 守护进程配置
 const DEFAULT_PORT = 9876;
@@ -620,16 +621,22 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         const limit = body.limit ? parseInt(body.limit) : undefined;
         const symbols = await activeClient.getWorkspaceSymbols(query, limit);
         
-        // 可选：按 kind 过滤
+        // 可选：按 kind 过滤 - 将字符串转换为数字进行比较
         let filtered = symbols;
         if (body.kind) {
-          const kindFilter = body.kind.toLowerCase();
-          filtered = symbols.filter((s: any) => 
-            s.kind.toLowerCase() === kindFilter
-          );
+          const kindNumber = stringToSymbolKind(body.kind);
+          if (kindNumber !== undefined) {
+            filtered = symbols.filter((s: any) => s.kind === kindNumber);
+          }
         }
         
-        result = { symbols: filtered, count: filtered.length };
+        // 将 kind 数字转换为字符串用于输出
+        const outputSymbols = filtered.map((s: any) => ({
+          ...s,
+          kind: symbolKindToString(s.kind)
+        }));
+        
+        result = { symbols: outputSymbols, count: outputSymbols.length };
         break;
       }
       

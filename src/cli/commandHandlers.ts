@@ -10,6 +10,7 @@ import { JdtLsClient } from '../jdtClient';
 import { SymbolQuery, ResolvedPosition, SymbolResolutionError, SymbolInfo } from '../core/types';
 import { getPosition, executeCommand } from './utils/positionResolver';
 import { outputResult } from './utils/outputHandler';
+import { stringToSymbolKind, symbolKindToString } from '../core/utils/symbolKind';
 
 /**
  * Call Hierarchy 命令实现
@@ -126,15 +127,22 @@ export async function handleWorkspaceSymbols(
 ): Promise<any> {
   let symbols = await client.getWorkspaceSymbols(query, limit) as any[];
   
-  // 按 kind 过滤
+  // 按 kind 过滤 - 将字符串转换为数字进行比较
   if (kind) {
-    const kindFilter = kind.toLowerCase();
-    symbols = symbols.filter((s: any) => 
-      s.kind.toLowerCase() === kindFilter
-    );
+    const kindNumber = stringToSymbolKind(kind);
+    if (kindNumber === undefined) {
+      throw new Error(`Invalid symbol kind: ${kind}. Supported: Class, Method, Field, Interface, Enum, etc.`);
+    }
+    symbols = symbols.filter((s: any) => s.kind === kindNumber);
   }
   
-  return { symbols, count: symbols.length };
+  // 将 kind 数字转换为字符串用于输出
+  const outputSymbols = symbols.map((s: any) => ({
+    ...s,
+    kind: symbolKindToString(s.kind)
+  }));
+  
+  return { symbols: outputSymbols, count: outputSymbols.length };
 }
 
 /**
