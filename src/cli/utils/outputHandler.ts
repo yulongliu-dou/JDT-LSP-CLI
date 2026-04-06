@@ -82,9 +82,14 @@ function setNestedValue(obj: any, path: string, value: any): void {
 }
 
 /**
- * 输出 JSON 结果（支持紧凑模式）
+ * 输出 JSON 结果（支持紧凑模式和文件输出）
  */
-export function outputResult<T>(result: any, command?: string, compact?: boolean): void {
+export function outputResult<T>(
+  result: any, 
+  command?: string, 
+  compact?: boolean,
+  outputFile?: string  // 新增：输出到文件（UTF-8编码）
+): void {
   let output = result;
   if (compact && result.data && command) {
     // 构建元数据
@@ -103,6 +108,18 @@ export function outputResult<T>(result: any, command?: string, compact?: boolean
       metadata
     };
   }
-  console.log(JSON.stringify(output, null, compact ? 0 : 2));
+  
+  const jsonStr = JSON.stringify(output, null, compact ? 0 : 2);
+  
+  if (outputFile) {
+    // 直接写UTF-8文件，绕过PowerShell的UTF-16 LE转换
+    const fs = require('fs');
+    fs.writeFileSync(outputFile, jsonStr, 'utf8');
+    console.log(`✅ Output written to: ${outputFile} (UTF-8)`);
+  } else {
+    // 输出到stdout（可能被PowerShell转码）
+    console.log(jsonStr);
+  }
+  
   process.exit(result.success ? 0 : 1);
 }

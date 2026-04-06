@@ -21,7 +21,7 @@ export function registerSymbolsCommand(program: Command) {
       const projectPath = path.resolve(opts.project);
       
       if (!fs.existsSync(filePath)) {
-        outputResult({ success: false, error: `File not found: ${filePath}`, elapsed: 0 });
+        outputResult({ success: false, error: `File not found: ${filePath}`, elapsed: 0 }, undefined, opts.jsonCompact, opts.output);
         return;
       }
       

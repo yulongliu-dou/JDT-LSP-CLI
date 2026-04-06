@@ -192,9 +192,16 @@ export function registerCallHierarchyCommand(program: Command) {
   let callHierarchyCmd = program
     .command('call-hierarchy [file] [line] [col]')
     .alias('ch')
-    .description('Get call hierarchy for a method. Use --method for auto-positioning.')
-    .option('-d, --depth <n>', 'Maximum recursion depth', '5')
-    .option('--incoming', 'Get incoming calls instead of outgoing', false);
+    .description('Get call hierarchy for a method. AI-friendly modes: lazy, snapshot, summary.')
+    .option('-d, --depth <n>', 'Maximum recursion depth', '3')
+    .option('--incoming', 'Get incoming calls instead of outgoing', false)
+    // AI友好模式选项
+    .option('--mode <type>', 'Query mode: lazy|snapshot|summary (default: legacy)', 'legacy')
+    .option('--cursor <id>', 'Cursor ID for lazy mode (continue previous query)')
+    .option('--fetch-source <ids>', 'Comma-separated method IDs to fetch source (lazy mode)')
+    .option('--expand-depth <ids>', 'Comma-separated method IDs to expand sub-calls (lazy mode)')
+    .option('--snapshot-path <path>', 'Output path for snapshot mode')
+    .option('--max-summary-depth <n>', 'Max depth for summary mode', '2');
   
   for (const opt of symbolOptions) {
     callHierarchyCmd = callHierarchyCmd.option(opt.flags, opt.desc);
@@ -207,75 +214,127 @@ export function registerCallHierarchyCommand(program: Command) {
     // 解析位置（支持符号模式）
     const posResult = await getPosition(file, line, col, cmdOptions, opts);
     if ('success' in posResult) {
-      outputResult(posResult);
+      outputResult(posResult, undefined, opts.jsonCompact, opts.output);
       return;
     }
     
     const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
     
-    await executeCommand(
-      '/call-hierarchy',
-      {
-        project: projectPath,
-        file: filePath,
-        line: resolvedLine,
-        col: resolvedCol,
-        depth: cmdOptions.depth,
-        incoming: cmdOptions.incoming,
-        options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
-      },
-      async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          const items = await client.prepareCallHierarchy(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
-          
-          if (!items || items.length === 0) {
-            return { entry: null, calls: [], totalMethods: 0 };
-          }
-          
-          const maxDepth = parseInt(cmdOptions.depth, 10);
-          const visited = new Set<string>();
-          const allCalls: any[] = [];
-          
-          async function collectCalls(item: any, depth: number): Promise<void> {
-            const key = `${item.uri}#${item.name}#${item.range?.start?.line}`;
-            if (visited.has(key) || depth > maxDepth) return;
-            visited.add(key);
+    // 根据mode选择不同的处理逻辑
+    if (cmdOptions.mode === 'legacy') {
+      // 原有逻辑(保持向后兼容)
+      await executeCommand(
+        '/call-hierarchy',
+        {
+          project: projectPath,
+          file: filePath,
+          line: resolvedLine,
+          col: resolvedCol,
+          depth: cmdOptions.depth,
+          incoming: cmdOptions.incoming,
+          options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
+        },
+        async () => {
+          let client: JdtLsClient | null = null;
+          try {
+            client = await createDirectClient(opts);
+            const items = await client.prepareCallHierarchy(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
             
-            const calls = cmdOptions.incoming
-              ? await client!.getIncomingCalls(item)
-              : await client!.getOutgoingCalls(item);
+            if (!items || items.length === 0) {
+              return { entry: null, calls: [], totalMethods: 0 };
+            }
             
-            for (const call of calls as any[]) {
-              const target = cmdOptions.incoming ? call.from : call.to;
-              if (!target.uri.includes('jdt://')) {
-                allCalls.push({
-                  depth,
-                  caller: cmdOptions.incoming ? target.name : item.name,
-                  callee: cmdOptions.incoming ? item.name : target.name,
-                  location: { uri: target.uri, range: target.range },
-                  kind: target.kind,
-                });
-                await collectCalls(target, depth + 1);
+            const maxDepth = parseInt(cmdOptions.depth, 10);
+            const visited = new Set<string>();
+            const allCalls: any[] = [];
+            
+            async function collectCalls(item: any, depth: number): Promise<void> {
+              const key = `${item.uri}#${item.name}#${item.range?.start?.line}`;
+              if (visited.has(key) || depth > maxDepth) return;
+              visited.add(key);
+              
+              const calls = cmdOptions.incoming
+                ? await client!.getIncomingCalls(item)
+                : await client!.getOutgoingCalls(item);
+              
+              for (const call of calls as any[]) {
+                const target = cmdOptions.incoming ? call.from : call.to;
+                if (!target.uri.includes('jdt://')) {
+                  allCalls.push({
+                    depth,
+                    caller: cmdOptions.incoming ? target.name : item.name,
+                    callee: cmdOptions.incoming ? item.name : target.name,
+                    location: { uri: target.uri, range: target.range },
+                    kind: target.kind,
+                  });
+                  await collectCalls(target, depth + 1);
+                }
               }
             }
+            
+            await collectCalls(items[0], 0);
+            
+            return {
+              entry: { name: items[0].name, kind: items[0].kind, detail: items[0].detail, uri: items[0].uri, range: items[0].range },
+              calls: allCalls,
+              totalMethods: visited.size,
+            };
+          } finally {
+            if (client) await client.stop();
           }
-          
-          await collectCalls(items[0], 0);
-          
-          return {
-            entry: { name: items[0].name, kind: items[0].kind, detail: items[0].detail, uri: items[0].uri, range: items[0].range },
-            calls: allCalls,
-            totalMethods: visited.size,
-          };
-        } finally {
-          if (client) await client.stop();
-        }
-      },
-      opts,
-      'callHierarchy'
-    );
+        },
+        opts,
+        'callHierarchy'
+      );
+    } else {
+      // 新的AI友好模式
+      await executeCommand(
+        `/call-hierarchy/${cmdOptions.mode}`,
+        {
+          project: projectPath,
+          file: filePath,
+          line: resolvedLine,
+          col: resolvedCol,
+          mode: cmdOptions.mode,
+          depth: cmdOptions.depth,
+          incoming: cmdOptions.incoming,
+          cursor: cmdOptions.cursor,
+          fetchSource: cmdOptions.fetchSource,
+          expandDepth: cmdOptions.expandDepth,
+          snapshotPath: cmdOptions.snapshotPath,
+          maxSummaryDepth: cmdOptions.maxSummaryDepth,
+          options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
+        },
+        async () => {
+          let client: JdtLsClient | null = null;
+          try {
+            client = await createDirectClient(opts);
+            const { EnhancedCallHierarchyService } = await import('../services/enhancedCallHierarchyService');
+            const service = new EnhancedCallHierarchyService((client as any).connectionManager);
+            
+            const query = {
+              filePath,
+              line: parseInt(resolvedLine),
+              col: parseInt(resolvedCol),
+              mode: cmdOptions.mode,
+              depth: parseInt(cmdOptions.depth),
+              direction: (cmdOptions.incoming ? 'incoming' : 'outgoing') as 'incoming' | 'outgoing',
+              cursor: cmdOptions.cursor,
+              fetchSource: cmdOptions.fetchSource ? cmdOptions.fetchSource.split(',') : undefined,
+              expandDepth: cmdOptions.expandDepth ? cmdOptions.expandDepth.split(',') : undefined,
+              snapshotPath: cmdOptions.snapshotPath,
+              maxSummaryDepth: parseInt(cmdOptions.maxSummaryDepth),
+            };
+            
+            return await service.executeQuery(query);
+          } finally {
+            if (client) await client.stop();
+          }
+        },
+        opts,
+        'callHierarchy'
+      );
+    }
   });
 }
 

@@ -28,7 +28,8 @@ program
   .option('-v, --verbose', 'Enable verbose logging', false)
   .option('--timeout <ms>', 'Operation timeout in milliseconds', '60000')
   .option('--no-daemon', 'Disable daemon mode, start JDT LS for each command (slower)')
-  .option('--json-compact', 'Output compact JSON (minimal fields)', false);
+  .option('--json-compact', 'Output compact JSON (minimal fields)', false)
+  .option('-o, --output <file>', 'Write output to file with UTF-8 encoding (bypasses PowerShell UTF-16 LE issue)');
 
 // ========== 新架构：注册所有命令 ==========
 registerAllCommands(program);

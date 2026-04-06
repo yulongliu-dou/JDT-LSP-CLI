@@ -85,6 +85,157 @@ export interface CallHierarchyIncomingCall {
   fromRanges: Range[];
 }
 
+// ========== 增强版调用链类型(AI友好) ==========
+
+/**
+ * 方法节点(增强版,用于AI分析)
+ */
+export interface MethodNode {
+  id: string;                    // 唯一标识符(如 "m1", "m1_2")
+  name: string;                  // 方法名
+  kind: string;                  // 方法类型(Method/Constructor等)
+  detail?: string;               // 方法详细信息
+  uri: string;                   // 文件URI
+  range: Range;                  // LSP Range(0-based)
+  classPath: string;             // 类全路径(如 org.apache.ibatis.executor.SimpleExecutor)
+  depth: number;                 // 调用深度层级(0=入口方法)
+  startLine: number;             // 方法开始行号(1-based,方便AI使用)
+  endLine: number;               // 方法结束行号(1-based)
+  filePath?: string;             // 文件系统路径(从uri转换)
+  children?: string[];           // 子方法ID列表
+  callerId?: string;             // 调用者ID(用于构建调用关系)
+}
+
+/**
+ * 游标状态(用于lazy模式)
+ */
+export interface CallHierarchyCursor {
+  id: string;                    // 游标ID(如 "ch_cursor_abc123")
+  entry: MethodNode;             // 入口方法
+  visited: Map<string, MethodNode>;  // 已访问的方法映射
+  callGraph: Map<string, string[]>;  // 调用图(parentId -> [childIds])
+  maxDepth: number;              // 最大深度
+  direction: 'incoming' | 'outgoing';  // 调用方向
+  createdAt: number;             // 创建时间戳
+  expiresAt: number;             // 过期时间戳
+}
+
+/**
+ * 调用链查询模式
+ */
+export type CallHierarchyMode = 'lazy' | 'snapshot' | 'summary';
+
+/**
+ * 调用链查询参数
+ */
+export interface CallHierarchyQuery {
+  filePath: string;              // 文件路径
+  line: number;                  // 方法所在行(1-based)
+  col: number;                   // 方法所在列(1-based)
+  mode: CallHierarchyMode;       // 查询模式
+  depth?: number;                // 查询深度(默认3)
+  direction?: 'incoming' | 'outgoing';  // 调用方向(默认outgoing)
+  
+  // lazy模式参数
+  cursor?: string;               // 游标ID(继续之前的查询)
+  fetchSource?: string[];        // 需要获取源码的方法ID列表
+  expandDepth?: string[];        // 需要展开子调用的方法ID列表
+  
+  // snapshot模式参数
+  snapshotPath?: string;         // 快照文件路径
+  includeSourceInSnapshot?: boolean;  // 快照中是否包含源码
+  
+  // summary模式参数
+  maxSummaryDepth?: number;      // 摘要最大深度(默认2)
+}
+
+/**
+ * Lazy模式响应
+ */
+export interface LazyCallHierarchyResult {
+  mode: 'lazy';
+  cursor: string;                // 游标ID(用于后续请求)
+  entry: MethodNode;             // 入口方法
+  methods: MethodNode[];         // 当前层级方法列表
+  nextActions: string[];         // 建议的下一步操作
+  expiresInSeconds: number;      // 游标过期时间
+  usageGuide: {                  // AI使用指南
+    description: string;         // 模式说明
+    howToUseCursor: string;      // 如何使用游标
+    howToUseMethodIds: string;   // 如何使用法法ID
+    nextActionsExplanation: string; // nextActions说明
+    example: string;             // 使用示例
+  };
+}
+
+/**
+ * 快照模式响应
+ */
+export interface SnapshotCallHierarchyResult {
+  mode: 'snapshot';
+  snapshotPath: string;          // 快照文件路径
+  indexPath: string;             // 索引文件路径(AI可读)
+  sourceDirPath: string;         // 源码目录路径
+  metadata: {
+    entry: string;               // 入口方法全路径
+    totalMethods: number;        // 总方法数
+    maxDepth: number;            // 最大深度
+    generatedAt: string;         // 生成时间
+  };
+  usageGuide: {                  // AI使用指南
+    description: string;         // 快照说明
+    fileStructure: string;       // 文件结构说明
+    howToUse: string[];          // 使用步骤
+    methodIdFormat: string;      // 方法ID格式说明
+    example: string;             // 使用示例
+  };
+}
+
+/**
+ * 摘要模式响应
+ */
+export interface SummaryCallHierarchyResult {
+  mode: 'summary';
+  entry: MethodNode;             // 入口方法
+  summary: {
+    totalMethods: number;        // 总方法数
+    totalClasses: number;        // 涉及的类数
+    depthDistribution: Record<number, number>;  // 每层方法数
+    hotspots: HotspotInfo[];     // 热点方法
+    externalDependencies: string[];  // 外部依赖
+  };
+  recommendations: RecommendationInfo[];  // AI分析建议
+  callGraphSummary: string;      // 调用链文本摘要
+  usageGuide: {                  // AI使用指南
+    description: string;         // 模式说明
+    howToUseSummary: string;     // 如何使用摘要
+    whenToUseOtherModes: string; // 何时使用其他模式
+    example: string;             // 使用示例
+  };
+}
+
+/**
+ * 热点方法信息
+ */
+export interface HotspotInfo {
+  methodId: string;
+  name: string;
+  classPath: string;
+  reason: string;                // 为什么是热点(如"被3个方法调用")
+  callCount: number;             // 被调用次数
+}
+
+/**
+ * 推荐信息
+ */
+export interface RecommendationInfo {
+  action: string;                // 建议动作(如"查看","深入分析")
+  methodId: string;
+  methodName: string;
+  reason: string;                // 推荐理由
+  priority: 'high' | 'medium' | 'low';  // 优先级
+}
+
 export interface DocumentSymbol {
   name: string;
   kind: string;

@@ -36,7 +36,7 @@ export function registerImplementationsCommand(program: Command) {
     // 解析位置（支持符号模式）
     const posResult = await getPosition(file, line, col, cmdOptions, opts);
     if ('success' in posResult) {
-      outputResult(posResult);
+      outputResult(posResult, undefined, opts.jsonCompact, opts.output);
       return;
     }
     

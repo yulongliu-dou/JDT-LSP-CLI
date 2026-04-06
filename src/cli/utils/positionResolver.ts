@@ -439,6 +439,7 @@ export async function executeCommand(
 ): Promise<void> {
   const startTime = Date.now();
   const compact = opts.jsonCompact;
+  const outputFile = opts.output;  // 获取--output参数
   
   // 如果禁用了守护进程，使用直接模式
   if (opts.daemon === false) {
@@ -448,13 +449,13 @@ export async function executeCommand(
         success: true,
         data: result,
         elapsed: Date.now() - startTime,
-      }, commandName, compact);
+      }, commandName, compact, outputFile);
     } catch (error: any) {
       outputResult({
         success: false,
         error: error.message,
         elapsed: Date.now() - startTime,
-      }, commandName, compact);
+      }, commandName, compact, outputFile);
     }
     return;
   }
@@ -463,7 +464,7 @@ export async function executeCommand(
   const daemonResult = await sendDaemonRequest(endpoint, body);
   
   if (daemonResult.success || !daemonResult.error?.includes('Daemon not running')) {
-    outputResult(daemonResult, commandName, compact);
+    outputResult(daemonResult, commandName, compact, outputFile);
     return;
   }
   
@@ -480,7 +481,7 @@ export async function executeCommand(
       success: true,
       data: result,
       elapsed: Date.now() - startTime,
-    }, commandName, compact);
+    }, commandName, compact, outputFile);
   } catch (error: any) {
     outputResult({
       success: false,
@@ -491,9 +492,15 @@ export async function executeCommand(
 }
 
 // 需要从 outputHandler 导入，避免循环依赖
-function outputResult<T>(result: any, command?: string, compact?: boolean): void {
+function outputResult<T>(
+  result: any, 
+  command?: string, 
+  compact?: boolean,
+  outputFile?: string
+): void {
   const { compactData } = require('./outputHandler');
   const { ResponseMetadata } = require('../../core/types') as any;
+  const fs = require('fs');
   
   let output = result;
   if (compact && result.data && command) {
@@ -511,7 +518,18 @@ function outputResult<T>(result: any, command?: string, compact?: boolean): void
       metadata
     };
   }
-  console.log(JSON.stringify(output, null, compact ? 0 : 2));
+  
+  const jsonStr = JSON.stringify(output, null, compact ? 0 : 2);
+  
+  if (outputFile) {
+    // 直接写UTF-8文件，绕过PowerShell的UTF-16 LE转换
+    fs.writeFileSync(outputFile, jsonStr, 'utf8');
+    console.log(`✅ Output written to: ${outputFile} (UTF-8)`);
+  } else {
+    // 输出到stdout（可能被PowerShell转码）
+    console.log(jsonStr);
+  }
+  
   process.exit(result.success ? 0 : 1);
 }
 

@@ -578,6 +578,42 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         break;
       }
       
+      case '/call-hierarchy/lazy':
+      case '/call-hierarchy/snapshot':
+      case '/call-hierarchy/summary': {
+        if (!file) {
+          throw new Error('Missing parameter: file');
+        }
+        // 解析位置
+        const posResult = await resolvePosition(body, activeClient);
+        if ('success' in posResult) {
+          sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
+          return;
+        }
+        const { line: posLine, col: posCol } = posResult;
+        
+        // 动态导入增强服务
+        const { EnhancedCallHierarchyService } = await import('./services/enhancedCallHierarchyService');
+        const service = new EnhancedCallHierarchyService((activeClient as any).connectionManager);
+        
+        const query = {
+          filePath: file,
+          line: posLine,
+          col: posCol,
+          mode: body.mode || 'lazy',
+          depth: parseInt(body.depth || '3'),
+          direction: (body.incoming ? 'incoming' : 'outgoing') as 'incoming' | 'outgoing',
+          cursor: body.cursor,
+          fetchSource: body.fetchSource ? body.fetchSource.split(',') : undefined,
+          expandDepth: body.expandDepth ? body.expandDepth.split(',') : undefined,
+          snapshotPath: body.snapshotPath,
+          maxSummaryDepth: parseInt(body.maxSummaryDepth || '2'),
+        };
+        
+        result = await service.executeQuery(query);
+        break;
+      }
+      
       case '/workspace-symbols':
       case '/find': {
         const query = body.query || '';
