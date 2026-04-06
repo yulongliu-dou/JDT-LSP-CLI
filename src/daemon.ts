@@ -352,7 +352,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           project: projectState,
           uptime: process.uptime(),
           pid: process.pid,
-          version: '1.6.8',
+          version: '1.7.0',
         },
         elapsed: Date.now() - startTime,
       });
