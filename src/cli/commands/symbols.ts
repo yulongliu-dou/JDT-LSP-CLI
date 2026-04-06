@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import { executeCommand, createDirectClient } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
+import { symbolKindToString } from '../../core/utils/symbolKind';
 
 export function registerSymbolsCommand(program: Command) {
   program
@@ -43,12 +44,28 @@ export function registerSymbolsCommand(program: Command) {
               const flatList: any[] = [];
               function flatten(symbols: any[], parent?: string) {
                 for (const sym of symbols) {
-                  flatList.push({ name: sym.name, kind: sym.kind, detail: sym.detail, range: sym.range, parent });
+                  flatList.push({ 
+                    name: sym.name, 
+                    kind: symbolKindToString(sym.kind), 
+                    detail: sym.detail, 
+                    range: sym.range, 
+                    parent 
+                  });
                   if (sym.children) flatten(sym.children, sym.name);
                 }
               }
               flatten(result);
               result = flatList;
+            } else {
+              // 层次化输出也需要转换 kind
+              function convertKind(symbols: any[]): any[] {
+                return symbols.map(sym => ({
+                  ...sym,
+                  kind: symbolKindToString(sym.kind),
+                  children: sym.children ? convertKind(sym.children) : undefined
+                }));
+              }
+              result = convertKind(result);
             }
             
             return { symbols: result, count: cmdOptions.flat ? result.length : undefined };

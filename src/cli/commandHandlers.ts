@@ -41,6 +41,11 @@ export async function handleCallHierarchy(
       ? await client.getIncomingCalls(item)
       : await client.getOutgoingCalls(item);
     
+    // 防御性检查：确保calls是可迭代数组
+    if (!calls || !Array.isArray(calls)) {
+      return;
+    }
+    
     for (const call of calls as any[]) {
       const target = options.incoming ? call.from : call.to;
       if (!target.uri.includes('jdt://')) {
@@ -105,12 +110,28 @@ export async function handleSymbols(
     const flatList: any[] = [];
     function flatten(symbols: any[], parent?: string) {
       for (const sym of symbols) {
-        flatList.push({ name: sym.name, kind: sym.kind, detail: sym.detail, range: sym.range, parent });
+        flatList.push({ 
+          name: sym.name, 
+          kind: symbolKindToString(sym.kind), 
+          detail: sym.detail, 
+          range: sym.range, 
+          parent 
+        });
         if (sym.children) flatten(sym.children, sym.name);
       }
     }
     flatten(result);
     result = flatList;
+  } else {
+    // 层次化输出也需要转换 kind
+    function convertKind(symbols: any[]): any[] {
+      return symbols.map(sym => ({
+        ...sym,
+        kind: symbolKindToString(sym.kind),
+        children: sym.children ? convertKind(sym.children) : undefined
+      }));
+    }
+    result = convertKind(result);
   }
   
   return { symbols: result, count: flat ? result.length : undefined };
@@ -264,6 +285,11 @@ export function registerCallHierarchyCommand(program: Command) {
               const calls = cmdOptions.incoming
                 ? await client!.getIncomingCalls(item)
                 : await client!.getOutgoingCalls(item);
+              
+              // 防御性检查：确保calls是可迭代数组
+              if (!calls || !Array.isArray(calls)) {
+                return;
+              }
               
               for (const call of calls as any[]) {
                 const target = cmdOptions.incoming ? call.from : call.to;

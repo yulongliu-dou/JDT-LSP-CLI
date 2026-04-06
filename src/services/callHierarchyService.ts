@@ -183,6 +183,11 @@ export class CallHierarchyService {
     // 获取子调用（这个方法调用了谁）
     const outgoingCalls = await this.getOutgoingCalls(item);
     
+    // 防御性检查：确保outgoingCalls是可迭代数组
+    if (!outgoingCalls || !Array.isArray(outgoingCalls)) {
+      return node;
+    }
+    
     // 递归构建子树
     for (const call of outgoingCalls) {
       const childNode = await this.buildCallTree(call as CallHierarchyItem, currentDepth + 1, maxDepth);

@@ -277,7 +277,14 @@ export class LspConnectionManager {
       throw new Error('Not initialized');
     }
 
-    return this.connection.sendRequest(CallHierarchyIncomingCallsRequest.type.method, { item });
+    const result = await this.connection.sendRequest(CallHierarchyIncomingCallsRequest.type.method, { item });
+    
+    // LSP规范允许返回null，统一转换为空数组
+    if (!result || !Array.isArray(result)) {
+      return [];
+    }
+    
+    return result;
   }
 
   /**
@@ -288,7 +295,14 @@ export class LspConnectionManager {
       throw new Error('Not initialized');
     }
 
-    return this.connection.sendRequest(CallHierarchyOutgoingCallsRequest.type.method, { item });
+    const result = await this.connection.sendRequest(CallHierarchyOutgoingCallsRequest.type.method, { item });
+    
+    // LSP规范允许返回null，统一转换为空数组
+    if (!result || !Array.isArray(result)) {
+      return [];
+    }
+    
+    return result;
   }
 
   /**

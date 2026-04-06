@@ -485,12 +485,28 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           const flatList: any[] = [];
           function flatten(syms: any[], parent?: string) {
             for (const sym of syms) {
-              flatList.push({ name: sym.name, kind: sym.kind, detail: sym.detail, range: sym.range, parent });
+              flatList.push({ 
+                name: sym.name, 
+                kind: symbolKindToString(sym.kind), 
+                detail: sym.detail, 
+                range: sym.range, 
+                parent 
+              });
               if (sym.children) flatten(sym.children, sym.name);
             }
           }
           flatten(symbols);
           symbols = flatList;
+        } else {
+          // 层次化输出也需要转换 kind
+          function convertKind(syms: any[]): any[] {
+            return syms.map(sym => ({
+              ...sym,
+              kind: symbolKindToString(sym.kind),
+              children: sym.children ? convertKind(sym.children) : undefined
+            }));
+          }
+          symbols = convertKind(symbols);
         }
         result = { symbols, count: body.flat ? symbols.length : undefined };
         break;
@@ -538,6 +554,12 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         const maxDepth = body.depth || 5;
         const incoming = body.incoming || false;
         
+        // 深度警告提示（不阻拦）
+        if (maxDepth > 5) {
+          console.warn(`⚠️  Warning: Call chain depth ${maxDepth} is large, may cause performance issues or parsing failures`);
+          console.warn(`   Suggestion: Use --depth 3-5 for best results`);
+        }
+        
         const items = await activeClient.prepareCallHierarchy(file, posLine, posCol);
         if (!items || items.length === 0) {
           result = { entry: null, calls: [], totalMethods: 0 };
@@ -554,6 +576,11 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
               ? await activeClient.getIncomingCalls(item)
               : await activeClient.getOutgoingCalls(item);
             
+            // 防御性检查：确保calls是可迭代数组（LSP规范允许返回null）
+            if (!calls || !Array.isArray(calls)) {
+              return;
+            }
+            
             for (const call of calls) {
               const target = incoming ? call.from : call.to;
               if (!target.uri.includes('jdt://')) {
@@ -562,7 +589,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
                   caller: incoming ? target.name : item.name,
                   callee: incoming ? item.name : target.name,
                   location: { uri: target.uri, range: target.range },
-                  kind: target.kind,
+                  kind: symbolKindToString(target.kind),
                 });
                 await collectCalls(target, depth + 1);
               }
@@ -571,7 +598,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           
           await collectCalls(items[0], 0);
           result = {
-            entry: { name: items[0].name, kind: items[0].kind, detail: items[0].detail, uri: items[0].uri, range: items[0].range },
+            entry: { name: items[0].name, kind: symbolKindToString(items[0].kind), detail: items[0].detail, uri: items[0].uri, range: items[0].range },
             calls: allCalls,
             totalMethods: visited.size,
           };
@@ -621,16 +648,23 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         const limit = body.limit ? parseInt(body.limit) : undefined;
         const symbols = await activeClient.getWorkspaceSymbols(query, limit);
         
-        // 可选：按 kind 过滤 - 将字符串转换为数字进行比较
+        // 可选：按 kind 过滤 - 支持字符串和数字两种格式
         let filtered = symbols;
         if (body.kind) {
           const kindNumber = stringToSymbolKind(body.kind);
-          if (kindNumber !== undefined) {
-            filtered = symbols.filter((s: any) => s.kind === kindNumber);
-          }
+          const kindString = body.kind.charAt(0).toUpperCase() + body.kind.slice(1).toLowerCase();
+          filtered = symbols.filter((s: any) => {
+            // 兼容 s.kind 是数字或字符串的情况
+            if (typeof s.kind === 'number') {
+              return kindNumber !== undefined && s.kind === kindNumber;
+            } else {
+              // s.kind 已经是字符串，直接比较
+              return s.kind === kindString;
+            }
+          });
         }
         
-        // 将 kind 数字转换为字符串用于输出
+        // 将 kind 统一转换为字符串用于输出
         const outputSymbols = filtered.map((s: any) => ({
           ...s,
           kind: symbolKindToString(s.kind)

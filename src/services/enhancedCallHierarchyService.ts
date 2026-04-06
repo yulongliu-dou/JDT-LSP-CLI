@@ -22,6 +22,7 @@ import {
   RecommendationInfo,
 } from '../core/types';
 import { LspConnectionManager } from '../jdt/lspConnection';
+import { symbolKindToString } from '../core/utils/symbolKind';
 
 /**
  * 增强版调用链服务
@@ -434,7 +435,7 @@ const m2Source = readFileSync('${sourceDirPath}/m2.java', 'utf-8');
     return {
       id,
       name: item.name,
-      kind: item.kind,
+      kind: symbolKindToString(item.kind),
       detail: item.detail,
       uri: item.uri,
       range: item.range,

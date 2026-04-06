@@ -159,14 +159,21 @@ export async function resolveGlobalPosition(
     }
   }
   
-  // 过滤符号类型（如果指定）- 将字符串转换为数字进行比较
+  // 过滤符号类型（如果指定）- 支持字符串和数字两种格式
   const kindFilter = cmdOptions.kind || 'Method';
   const kindNumber = stringToSymbolKind(kindFilter);
+  const kindString = kindFilter.charAt(0).toUpperCase() + kindFilter.slice(1).toLowerCase();
   
   // 先按 kind 过滤，然后精确匹配名称
-  const sameKindSymbols = symbols.filter((s: any) => 
-    s.kind === kindNumber
-  );
+  const sameKindSymbols = symbols.filter((s: any) => {
+    // 兼容 s.kind 是数字或字符串的情况
+    if (typeof s.kind === 'number') {
+      return kindNumber !== undefined && s.kind === kindNumber;
+    } else {
+      // s.kind 已经是字符串，直接比较
+      return s.kind === kindString;
+    }
+  });
   
   // 精确匹配名称
   let filtered = sameKindSymbols.filter((s: any) => 
