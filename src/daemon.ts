@@ -30,6 +30,9 @@ let client: JdtLsClient | null = null;
 let isReady = false;
 let currentProject: string | null = null;
 let lastLoadEvent: ProjectLoadEvent | undefined;
+// 调用链服务实例(用于保持cursor缓存)
+let callHierarchyService: any = null;
+let callHierarchyServiceProject: string | null = null;
 
 // 初始化进度追踪
 let initProgress: InitProgress = {
@@ -112,6 +115,11 @@ async function initClient(projectPath: string, options: Partial<CLIOptions> = {}
     await client.stop();
     client = null;
     isReady = false;
+    
+    // 清理调用链服务实例，因为cursor是与项目相关的
+    callHierarchyService = null;
+    callHierarchyServiceProject = null;
+    log('Cleared callHierarchyService due to project change');
   }
   
   if (!client) {
@@ -352,7 +360,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           project: projectState,
           uptime: process.uptime(),
           pid: process.pid,
-          version: '1.7.0',
+          version: '1.7.1',
         },
         elapsed: Date.now() - startTime,
       });
@@ -620,9 +628,16 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         }
         const { line: posLine, col: posCol } = posResult;
         
-        // 动态导入增强服务
-        const { EnhancedCallHierarchyService } = await import('./services/enhancedCallHierarchyService');
-        const service = new EnhancedCallHierarchyService((activeClient as any).connectionManager);
+        // 复用或创建EnhancedCallHierarchyService实例
+        // 这样可以保持cursor缓存在多次HTTP请求之间可用
+        if (!callHierarchyService || callHierarchyServiceProject !== project) {
+          const { EnhancedCallHierarchyService } = await import('./services/enhancedCallHierarchyService');
+          callHierarchyService = new EnhancedCallHierarchyService(
+            (activeClient as any).connectionManager
+          );
+          callHierarchyServiceProject = project;
+          log('Created new EnhancedCallHierarchyService for project:', project);
+        }
         
         const query = {
           filePath: file,
@@ -638,7 +653,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           maxSummaryDepth: parseInt(body.maxSummaryDepth || '2'),
         };
         
-        result = await service.executeQuery(query);
+        result = await callHierarchyService.executeQuery(query);
         break;
       }
       
