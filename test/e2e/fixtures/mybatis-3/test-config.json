@@ -1,0 +1,71 @@
+{
+  "projectPath": "E:\\mybatis-3-master",
+  "description": "MyBatis-3 E2E 测试配置",
+  "testTargets": {
+    "sqlSession": {
+      "file": "src\\main\\java\\org\\apache\\ibatis\\session\\defaults\\DefaultSqlSession.java",
+      "methods": [
+        {
+          "name": "selectOne",
+          "overloads": 2,
+          "signatures": ["(String)", "(String, Object)"]
+        },
+        {
+          "name": "selectList",
+          "overloads": 3,
+          "signatures": ["(String)", "(String, Object)", "(String, Object, RowBounds)"]
+        },
+        {
+          "name": "selectMap",
+          "overloads": 3
+        },
+        {
+          "name": "insert",
+          "overloads": 2
+        },
+        {
+          "name": "update",
+          "overloads": 2
+        },
+        {
+          "name": "delete",
+          "overloads": 2
+        }
+      ]
+    },
+    "executor": {
+      "interface": "src\\main\\java\\org\\apache\\ibatis\\executor\\Executor.java",
+      "implementations": [
+        "src\\main\\java\\org\\apache\\ibatis\\executor\\SimpleExecutor.java",
+        "src\\main\\java\\org\\apache\\ibatis\\executor\\ReuseExecutor.java",
+        "src\\main\\java\\org\\apache\\ibatis\\executor\\BatchExecutor.java",
+        "src\\main\\java\\org\\apache\\ibatis\\executor\\CachingExecutor.java"
+      ],
+      "baseClass": "src\\main\\java\\org\\apache\\ibatis\\executor\\BaseExecutor.java"
+    },
+    "builder": {
+      "baseClass": "src\\main\\java\\org\\apache\\ibatis\\builder\\BaseBuilder.java",
+      "xmlMapperBuilder": "src\\main\\java\\org\\apache\\ibatis\\builder\\xml\\XMLMapperBuilder.java"
+    }
+  },
+  "expectedCallChains": {
+    "selectOne": {
+      "entry": "selectOne(String)",
+      "expectedChain": [
+        "selectOne(String) → selectOne(String, Object)",
+        "selectOne(String, Object) → selectList(String, Object)",
+        "selectList(String, Object) → selectList(String, Object, RowBounds)"
+      ],
+      "minDepth": 3
+    },
+    "selectList": {
+      "entry": "selectList(String, Object, RowBounds)",
+      "callsExecutor": true,
+      "executorMethod": "query"
+    }
+  },
+  "expectedImplementations": {
+    "SqlSession": ["DefaultSqlSession", "SqlSessionManager"],
+    "Executor": ["SimpleExecutor", "ReuseExecutor", "BatchExecutor", "CachingExecutor"]
+  }
+}

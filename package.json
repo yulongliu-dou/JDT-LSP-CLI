@@ -12,7 +12,16 @@
     "start": "node dist/cli.js",
     "link": "npm run build && npm link",
     "prepublishOnly": "npm run build",
-    "update-version": "node scripts/update-version.js"
+    "update-version": "node scripts/update-version.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:unit": "jest test/unit",
+    "test:integration": "jest test/integration",
+    "test:e2e": "jest test/e2e --runInBand",
+    "test:mybatis": "jest test/e2e/scenarios/mybatis --runInBand",
+    "test:clear-cache": "jest --clearCache",
+    "test:cache-status": "node -e \"console.log('Jest cache dir:', require('os').tmpdir() + '/jest_0')\""
   },
   "keywords": [
     "java",
@@ -51,7 +60,10 @@
     "vscode-languageserver-protocol": "^3.17.5"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.x",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.9",
     "typescript": "^5.x"
   }
 }

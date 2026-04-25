@@ -1,0 +1,308 @@
+# JDT-LSP-CLI 测试快速指南
+
+## 📦 安装和设置
+
+### 1. 安装依赖
+```bash
+npm install
+```
+
+### 2. 构建项目
+```bash
+npm run build
+```
+
+### 3. 验证 MyBatis 项目
+```bash
+# 检查默认路径
+ls E:\mybatis-3-master
+
+# 或设置自定义路径
+$env:MYBATIS_PROJECT_PATH="你的路径"
+```
+
+## 🚀 运行测试
+
+### 单元测试（快速，推荐首先运行）
+```bash
+npm run test:unit
+```
+**预期**: ~2秒，69个用例
+
+### E2E 测试（需要 MyBatis 项目）
+```bash
+# 运行所有 MyBatis 测试
+npm run test:mybatis
+
+# 或单独运行
+npm run test:e2e
+```
+**预期**: ~5-10分钟，45+个用例
+
+### 完整测试套件
+```bash
+npm test
+```
+
+### 生成覆盖率报告
+```bash
+npm run test:coverage
+# 报告位置: coverage/index.html
+```
+
+### 开发模式（监视文件变化）
+```bash
+npm run test:watch
+```
+
+## 📊 测试文件位置
+
+```
+test/
+├── unit/                              # 单元测试
+│   ├── services/
+│   │   ├── symbolService.test.ts      # 43用例 ⚠️ 7失败
+│   │   └── enhancedCallHierarchy/
+│   │       └── helpers.test.ts        # 7用例 ❌ 导入失败
+│   └── core/
+│       └── utils/
+│           └── symbolKind.test.ts     # 19用例
+│
+├── e2e/                               # E2E测试
+│   └── scenarios/
+│       └── mybatis/
+│           ├── sqlSession.test.ts     # 20+用例
+│           ├── executor.test.ts       # 10用例
+│           └── allCommands.test.ts    # 15用例
+│
+└── helpers/
+    └── testUtils.ts                   # 测试工具
+```
+
+## 🔧 常用测试命令
+
+### 运行单个测试文件
+```bash
+npx jest test/unit/services/symbolService.test.ts
+```
+
+### 运行特定测试用例
+```bash
+npx jest -t "应该从完整的方法detail中提取签名"
+```
+
+### 只运行失败的测试
+```bash
+npx jest --onlyFailures
+```
+
+### 更新快照
+```bash
+npx jest --updateSnapshot
+```
+
+### 详细输出
+```bash
+npx jest --verbose
+```
+
+## ⚠️ 当前已知问题
+
+### 1. symbolService 测试失败 (7个)
+
+**原因**: 测试预期与实际实现行为不匹配
+
+**选项**:
+```bash
+# 选项A: 查看失败详情
+npm run test:unit -- --verbose
+
+# 选项B: 查看实际实现
+code src/services/symbolService.ts
+
+# 选项C: 临时跳过失败测试（不推荐）
+# 在测试用例前加 .skip
+it.skip('应该拒绝不匹配的签名', () => {...})
+```
+
+### 2. helpers.test.ts 导入失败
+
+**检查**:
+```bash
+# 查看 helpers.ts 是否存在
+ls src/services/enhancedCallHierarchy/core/helpers.ts
+
+# 查看导出内容
+grep "export" src/services/enhancedCallHierarchy/core/helpers.ts
+```
+
+## 🎯 测试 MyBatis 特定功能
+
+### 测试 SqlSession 调用链
+```bash
+# 使用 CLI 手动测试
+jls -p E:\mybatis-3-master ch src\main\java\org\apache\ibatis\session\defaults\DefaultSqlSession.java --method selectOne --index 0 -d 3
+
+# 或运行自动化测试
+npm run test:mybatis -- --testPathPattern=sqlSession
+```
+
+### 测试 Executor 层次
+```bash
+# 查找实现
+jls -p E:\mybatis-3-master impl src\main\java\org\apache\ibatis\executor\Executor.java
+
+# 运行测试
+npm run test:mybatis -- --testPathPattern=executor
+```
+
+### 测试所有命令
+```bash
+npm run test:mybatis -- --testPathPattern=allCommands
+```
+
+## 🐛 调试测试
+
+### 使用 VS Code 调试
+1. 打开测试文件
+2. 在测试用例行号旁点击 "Run | Debug"
+3. 或使用调试配置:
+
+**.vscode/launch.json**:
+```json
+{
+  "type": "node",
+  "request": "launch",
+  "name": "Debug Current Test",
+  "program": "${workspaceFolder}/node_modules/.bin/jest",
+  "args": [
+    "--runInBand",
+    "--no-cache",
+    "${relativeFile}"
+  ],
+  "console": "integratedTerminal",
+  "internalConsoleOptions": "neverOpen",
+  "disableOptimisticBPs": true,
+  "windows": {
+    "program": "${workspaceFolder}/node_modules/jest/bin/jest"
+  }
+}
+```
+
+### 使用 Node 调试
+```bash
+node --inspect-brk node_modules/.bin/jest --runInBand test/unit/services/symbolService.test.ts
+```
+然后在 Chrome 中打开 `chrome://inspect`
+
+## 📈 查看覆盖率
+
+### 生成 HTML 报告
+```bash
+npm run test:coverage
+```
+
+### 查看报告
+```bash
+# Windows
+start coverage/index.html
+
+# 查看摘要
+type coverage/coverage-summary.json
+```
+
+### 目标覆盖率
+- 行覆盖率: 80%+
+- 分支覆盖率: 70%+
+- 函数覆盖率: 80%+
+- 语句覆盖率: 80%+
+
+## 🔍 常见问题
+
+### Q: 测试超时怎么办？
+```bash
+# 增加超时时间（jest.config.js）
+testTimeout: 120000,  # 改为120秒
+
+# 或先启动守护进程
+jls daemon start --eager --init-project E:\mybatis-3-master
+```
+
+### Q: 找不到 MyBatis 项目？
+```bash
+# 检查路径
+echo $env:MYBATIS_PROJECT_PATH
+
+# 设置路径
+$env:MYBATIS_PROJECT_PATH="E:\mybatis-3-master"
+
+# 或修改配置文件
+code test/helpers/testUtils.ts
+```
+
+### Q: 如何添加新测试？
+1. 创建测试文件: `test/unit/xxx.test.ts`
+2. 使用现有工具函数: `import { execCLI } from '../helpers/testUtils'`
+3. 运行测试: `npm run test:unit`
+
+### Q: TypeScript 编译错误？
+```bash
+# 清理并重新构建
+npm run build
+
+# 清除 Jest 缓存
+npx jest --clearCache
+```
+
+## 📚 学习资源
+
+- [Jest 官方文档](https://jestjs.io/docs/getting-started)
+- [测试最佳实践](https://jestjs.io/docs/best-practices)
+- [MyBatis-3 源码](https://github.com/mybatis/mybatis-3)
+- [项目测试文档](test/README.md)
+- [测试总结](test/TEST_SUMMARY.md)
+
+## 🎓 测试示例
+
+### 单元测试示例
+```typescript
+import { extractSignature } from '../../../src/services/symbolService';
+
+describe('签名提取', () => {
+  it('应该从方法detail中提取签名', () => {
+    const detail = 'myMethod(String orderId, int quantity) : void';
+    expect(extractSignature(detail)).toBe('String orderId, int quantity');
+  });
+});
+```
+
+### E2E 测试示例
+```typescript
+import { execCLI, parseJSONOutput, MYBATIS_PROJECT } from '../../../helpers/testUtils';
+
+describe('MyBatis E2E', () => {
+  it('应该搜索到 SqlSession 类', async () => {
+    const result = await execCLI([
+      '-p', MYBATIS_PROJECT.path,
+      'find', 'SqlSession',
+      '--kind', 'Class',
+      '--json-compact'
+    ]);
+
+    const output = parseJSONOutput(result.stdout);
+    expect(output.success).toBe(true);
+  });
+});
+```
+
+## 🎉 快速验证
+
+运行这个命令验证测试环境：
+```bash
+# 应该看到 43 个单元测试运行
+npm run test:unit 2>&1 | Select-String "Tests:"
+```
+
+---
+
+**提示**: 首次运行 E2E 测试可能需要较长时间（JDT LS 启动和索引），建议先运行单元测试验证环境。

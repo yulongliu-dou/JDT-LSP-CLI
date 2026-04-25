@@ -62,7 +62,63 @@ export function normalizeGenericType(typeName: string): string {
   if (!typeName) return '';
   // 移除泛型参数：List<String> -> List
   // 处理嵌套泛型：List<Map<String, Integer>> -> List
-  return typeName.replace(/<[^<>]*>/g, '').replace(/<.*$/g, '').trim();
+  // 使用循环处理嵌套泛型
+  let result = typeName;
+  let prevResult;
+  do {
+    prevResult = result;
+    result = result.replace(/<[^<>]*>/g, '');
+  } while (result !== prevResult);
+  return result.replace(/<.*$/g, '').trim();
+}
+
+/**
+ * 规范化单个类型（用于签名规范化）
+ */
+function normalizeSingleType(typeName: string, stripGenerics: boolean): string {
+  let type = typeName.trim();
+  if (stripGenerics) {
+    // 移除泛型参数
+    let result = type;
+    let prevResult;
+    do {
+      prevResult = result;
+      result = result.replace(/<[^<>]*>/g, '');
+    } while (result !== prevResult);
+    type = result.replace(/<.*$/g, '').trim();
+  }
+  return type.toLowerCase();
+}
+
+/**
+ * 智能分割签名参数（忽略泛型内的逗号）
+ * 例："List<String>, Map<String, Integer>" -> ["List<String>", "Map<String, Integer>"]
+ */
+function smartSplitSignature(signature: string): string[] {
+  const params: string[] = [];
+  let current = '';
+  let depth = 0;
+  
+  for (const char of signature) {
+    if (char === '<') {
+      depth++;
+      current += char;
+    } else if (char === '>') {
+      depth--;
+      current += char;
+    } else if (char === ',' && depth === 0) {
+      params.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  
+  if (current.trim()) {
+    params.push(current.trim());
+  }
+  
+  return params;
 }
 
 /**
@@ -73,22 +129,19 @@ export function normalizeGenericType(typeName: string): string {
 export function normalizeSignature(signature: string, stripGenerics: boolean = true): string {
   if (!signature) return '';
   
-  return signature
-    .split(',')
+  // 使用智能分割处理泛型内的逗号
+  const params = smartSplitSignature(signature);
+  
+  return params
     .map(param => {
-      const trimmed = param.trim();
       // 提取类型名（处理泛型和数组）
-      const parts = trimmed.split(/\s+/);
-      let typeName = parts[0] || '';
-      // 可选：移除泛型参数
-      if (stripGenerics) {
-        typeName = normalizeGenericType(typeName);
-      }
-      return typeName;
+      const parts = param.split(/\s+/);
+      const typeName = parts[0] || '';
+      // 使用专门的函数规范化单个类型
+      return normalizeSingleType(typeName, stripGenerics);
     })
     .filter(Boolean)
-    .join(',')
-    .toLowerCase();
+    .join(',');
 }
 
 /**
@@ -107,6 +160,11 @@ export function matchSignature(symbolDetail: string | undefined, querySignature:
     symbolSigFromDetail = extractSignature(symbolName);
   }
   
+  // 如果还是没有签名，说明 symbolDetail 本身就是签名（没有方法名）
+  if (!symbolSigFromDetail && symbolDetail) {
+    symbolSigFromDetail = symbolDetail;
+  }
+  
   // 从 querySignature 提取签名（处理带括号和不带括号的情况）
   let querySigClean = querySignature;
   if (querySignature.startsWith('(') && querySignature.endsWith(')')) {
@@ -123,8 +181,8 @@ export function matchSignature(symbolDetail: string | undefined, querySignature:
   const querySig = normalizeSignature(querySigClean, true);
   if (symbolSig === querySig) return true;
   
-  // 部分匹配（查询签名是符号签名的子串）
-  if (symbolSig.includes(querySig) || querySig.includes(symbolSig)) return true;
+  // 部分匹配（仅当至少有一个参数时，且查询是符号的前缀）
+  if (symbolSig && querySig && symbolSig.startsWith(querySig)) return true;
   
   return false;
 }
@@ -133,18 +191,45 @@ export function matchSignature(symbolDetail: string | undefined, querySignature:
  * 模糊匹配符号名称（支持泛型类名）
  */
 export function fuzzyMatchName(symbolName: string, queryName: string): boolean {
+  if (!symbolName && !queryName) return true;
   if (!symbolName || !queryName) return false;
   
   // 精确匹配
   if (symbolName === queryName) return true;
+  
+  // 大小写不敏感匹配
+  if (symbolName.toLowerCase() === queryName.toLowerCase()) return true;
   
   // 泛型模糊匹配：移除泛型后比较
   const normalizedSymbol = normalizeGenericType(symbolName);
   const normalizedQuery = normalizeGenericType(queryName);
   if (normalizedSymbol === normalizedQuery) return true;
   
+  // 大小写不敏感的泛型匹配
+  if (normalizedSymbol.toLowerCase() === normalizedQuery.toLowerCase()) return true;
+  
   // 前缀匹配（用于部分输入）
   if (normalizedSymbol.startsWith(normalizedQuery) || normalizedQuery.startsWith(normalizedSymbol)) {
+    return true;
+  }
+  
+  // 大小写不敏感的前缀匹配
+  const symbolLower = normalizedSymbol.toLowerCase();
+  const queryLower = normalizedQuery.toLowerCase();
+  if (symbolLower.startsWith(queryLower) || queryLower.startsWith(symbolLower)) {
+    return true;
+  }
+  
+  // 子串匹配（支持部分匹配）
+  if (symbolLower.includes(queryLower) || queryLower.includes(symbolLower)) {
+    return true;
+  }
+  
+  // 下划线转驼峰匹配
+  const queryCamelToUnderscore = queryName.replace(/([A-Z])/g, '_$1').toLowerCase();
+  const symbolCamelToUnderscore = symbolName.replace(/([A-Z])/g, '_$1').toLowerCase();
+  if (queryCamelToUnderscore === symbolCamelToUnderscore) return true;
+  if (queryCamelToUnderscore.includes(symbolCamelToUnderscore) || symbolCamelToUnderscore.includes(queryCamelToUnderscore)) {
     return true;
   }
   

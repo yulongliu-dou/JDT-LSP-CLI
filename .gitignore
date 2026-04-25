@@ -3,3 +3,6 @@ dist/
 *.tsbuildinfo
 test-output/
 test-reports
+# Jest 缓存（方案 F）
+.jest-cache/
+coverage/

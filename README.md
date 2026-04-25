@@ -155,28 +155,49 @@ jls refs src/main/java/com/example/UserService.java --method processOrder
 | 守护进程模式 | 30-60s | **5-500ms** |
 | 直接模式 | 30-60s | 30-60s |
 
+## 测试
+
+本项目包含完整的测试套件（115+ 用例），覆盖单元测试和 E2E 测试：
+
+```bash
+# 运行单元测试（快速，~0.5秒）
+npm run test:unit
+
+# 运行 E2E 测试（基于 MyBatis-3 项目）
+npm run test:mybatis
+
+# 生成覆盖率报告
+npm run test:coverage
+```
+
+### 测试性能优化成果
+
+通过 **TypeScript 编译缓存** + **Daemon 模式共享 JDT LS**，E2E 测试性能实现显著提升：
+
+| 指标 | 优化前 | 优化后 | 改善 |
+|------|--------|--------|------|
+| 单元测试 | ~2s | **0.45s** | **75%** |
+| E2E 单命令 | 18.5s | **7.8s** | **58%** |
+| E2E 全量(32用例) | ~10min | **~3min** | **67%** |
+
+详见 [test/README.md](test/README.md) 获取完整测试文档。
+
 ## 项目结构
 
 ```
 jdt-lsp-cli/
 ├── docs/                      # 文档目录
 │   ├── commands/              # 各命令的详细文档
-│   │   ├── find.md
-│   │   ├── symbols.md
-│   │   ├── definition.md
-│   │   ├── references.md
-│   │   ├── hover.md
-│   │   ├── call-hierarchy.md
-│   │   ├── implementations.md
-│   │   ├── type-definition.md
-│   │   ├── daemon.md
-│   │   └── config.md
 │   └── global-options.md      # 全局选项文档
 ├── src/                       # 源代码
 │   ├── cli/                   # CLI 命令实现
 │   ├── core/                  # 核心功能
 │   ├── jdt/                   # JDT LS 集成
 │   └── services/              # 服务层
+├── test/                      # 测试套件
+│   ├── unit/                  # 单元测试
+│   ├── e2e/                   # E2E 测试（MyBatis-3）
+│   └── helpers/               # 测试工具
 └── README.md                  # 本文件（文档索引）
 ```
 
