@@ -26,6 +26,11 @@ export function matchSignature(symbolDetail: string | undefined, querySignature:
     symbolSigFromDetail = extractSignature(symbolName);
   }
   
+  // 如果还是没有签名，说明 symbolDetail 本身就是签名（没有方法名）
+  if (!symbolSigFromDetail && symbolDetail) {
+    symbolSigFromDetail = symbolDetail;
+  }
+  
   // 从 querySignature 提取签名（处理带括号和不带括号的情况）
   // 如果用户传入 "(boolean)"，需要提取为 "boolean"
   let querySigClean = querySignature;
@@ -43,8 +48,9 @@ export function matchSignature(symbolDetail: string | undefined, querySignature:
   const querySig = normalizeSignature(querySigClean, true);
   if (symbolSig === querySig) return true;
   
-  // 部分匹配（查询签名是符号签名的子串）
-  if (symbolSig.includes(querySig) || querySig.includes(symbolSig)) return true;
+  // 部分匹配（仅当至少有一个参数时，且查询是符号的前缀）
+  // 使用 startsWith 而非 includes，更可控，避免 'int' 匹配 'String, int'
+  if (symbolSig && querySig && symbolSig.startsWith(querySig)) return true;
   
   return false;
 }
@@ -52,20 +58,48 @@ export function matchSignature(symbolDetail: string | undefined, querySignature:
 /**
  * 模糊匹配符号名称（支持泛型类名）
  * 例: "List" 匹配 "List<String>", "UserService" 匹配 "UserService"
+ * 支持: 大小写不敏感、子串匹配、驼峰↔下划线转换
  */
 export function fuzzyMatchName(symbolName: string, queryName: string): boolean {
+  if (!symbolName && !queryName) return true;
   if (!symbolName || !queryName) return false;
   
   // 精确匹配
   if (symbolName === queryName) return true;
+  
+  // 大小写不敏感匹配
+  if (symbolName.toLowerCase() === queryName.toLowerCase()) return true;
   
   // 泛型模糊匹配：移除泛型后比较
   const normalizedSymbol = normalizeGenericType(symbolName);
   const normalizedQuery = normalizeGenericType(queryName);
   if (normalizedSymbol === normalizedQuery) return true;
   
+  // 大小写不敏感的泛型匹配
+  if (normalizedSymbol.toLowerCase() === normalizedQuery.toLowerCase()) return true;
+  
   // 前缀匹配（用于部分输入）
   if (normalizedSymbol.startsWith(normalizedQuery) || normalizedQuery.startsWith(normalizedSymbol)) {
+    return true;
+  }
+  
+  // 大小写不敏感的前缀匹配
+  const symbolLower = normalizedSymbol.toLowerCase();
+  const queryLower = normalizedQuery.toLowerCase();
+  if (symbolLower.startsWith(queryLower) || queryLower.startsWith(symbolLower)) {
+    return true;
+  }
+  
+  // 子串匹配（支持部分匹配）
+  if (symbolLower.includes(queryLower) || queryLower.includes(symbolLower)) {
+    return true;
+  }
+  
+  // 下划线转驼峰匹配
+  const queryCamelToUnderscore = queryName.replace(/([A-Z])/g, '_$1').toLowerCase();
+  const symbolCamelToUnderscore = symbolName.replace(/([A-Z])/g, '_$1').toLowerCase();
+  if (queryCamelToUnderscore === symbolCamelToUnderscore) return true;
+  if (queryCamelToUnderscore.includes(symbolCamelToUnderscore) || symbolCamelToUnderscore.includes(queryCamelToUnderscore)) {
     return true;
   }
   

@@ -138,6 +138,6 @@ jls hover --json-compact MyClass.java --method myMethod
 
 ## 相关命令
 
-- [definition](definition.md) - 跳转到符号定义
-- [symbols](symbols.md) - 获取文件中的所有符号
-- [references](references.md) - 查找符号的所有引用
+- [跳转定义](definition-跳转定义.md) - 跳转到符号定义
+- [文档符号](symbols-文档符号.md) - 获取文件中的所有符号
+- [查找引用](references-查找引用.md) - 查找符号的所有引用

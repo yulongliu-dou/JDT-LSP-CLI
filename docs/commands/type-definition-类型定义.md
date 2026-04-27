@@ -184,6 +184,6 @@ jls sym path/to/User.java --flat
 
 ## 相关命令
 
-- [definition](definition.md) - 跳转到符号定义
-- [hover](hover.md) - 获取符号的类型信息
-- [symbols](symbols.md) - 获取文件中的所有符号
+- [跳转定义](definition-跳转定义.md) - 跳转到符号定义
+- [悬停信息](hover-悬停信息.md) - 获取符号的类型信息
+- [文档符号](symbols-文档符号.md) - 获取文件中的所有符号

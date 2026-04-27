@@ -27,6 +27,7 @@ export {
   extractSimpleSignature,
   normalizeGenericType,
   normalizeSignature,
+  smartSplitSignature,
   extractReturnType,
   extractSignatureFromName,
 } from './symbolResolver/signature/signatureExtractor';

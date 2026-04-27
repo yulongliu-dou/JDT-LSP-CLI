@@ -51,7 +51,8 @@ describe('Daemon Mode E2E Tests', () => {
 
       const output = parseJSONOutput(result.stdout);
       expect(output.success).toBe(true);
-      expect(output.data.length).toBeGreaterThan(0);
+      const symbolCount = output.data.symbols?.length || output.data.count || 0;
+      expect(symbolCount).toBeGreaterThan(0);
     }, 30000);
 
     it('should execute second command faster (daemon reuse)', async () => {

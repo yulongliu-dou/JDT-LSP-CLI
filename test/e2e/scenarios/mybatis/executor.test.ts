@@ -24,20 +24,23 @@ describe('MyBatis E2E - Executor 层次结构（Daemon 模式）', () => {
       const result = await execCLIWithDaemon([
         '-p', MYBATIS_PROJECT.path,
         'impl', MYBATIS_PROJECT.files.executorInterface,
+        '--symbol', 'Executor',
         '--json-compact'
       ]);
 
       const output = parseJSONOutput(result.stdout);
       
       expect(output.success).toBe(true);
-      expect(Array.isArray(output.data)).toBe(true);
-      expect(output.data.length).toBeGreaterThanOrEqual(4); // 至少4个实现
+      expect(Array.isArray(output.data.implementations)).toBe(true);
+      const implCount = output.data.implementations?.length || output.data.count || 0;
+      expect(implCount).toBeGreaterThanOrEqual(4); // 至少4个实现
     }, 60000);
 
     it('应该找到 BaseExecutor 的子类', async () => {
       const result = await execCLIWithDaemon([
         '-p', MYBATIS_PROJECT.path,
         'impl', MYBATIS_PROJECT.files.baseExecutor,
+        '--symbol', 'BaseExecutor',
         '--json-compact'
       ]);
 
@@ -113,7 +116,8 @@ describe('MyBatis E2E - Executor 层次结构（Daemon 模式）', () => {
 
       const output = parseJSONOutput(result.stdout);
       expect(output.success).toBe(true);
-      expect(output.data.length).toBeGreaterThan(0);
+      const symbolCount = output.data.symbols?.length || output.data.count || 0;
+      expect(symbolCount).toBeGreaterThan(0);
     }, 60000);
 
     it('应该搜索到 SimpleExecutor 类', async () => {

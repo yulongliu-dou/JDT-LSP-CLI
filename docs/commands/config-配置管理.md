@@ -303,5 +303,5 @@ jls daemon start --eager --init-project E:\large-project --wait
 
 ## 相关命令
 
-- [daemon](daemon.md) - 管理守护进程
-- [全局选项](../global-options.md) - 命令行全局选项
+- [守护进程管理](daemon-守护进程管理.md) - 管理守护进程
+- [全局选项](../全局选项.md) - 命令行全局选项

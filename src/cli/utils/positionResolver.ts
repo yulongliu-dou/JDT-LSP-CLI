@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { JdtLsClient } from '../../jdtClient';
 import { SymbolInfo, CLIResult } from '../../core/types';
-import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult } from '../../symbolResolver';
+import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult, matchSignature as matchSignatureUnified } from '../../symbolResolver';
 import { sendDaemonRequest } from './daemonRequest';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
 
@@ -194,7 +194,7 @@ export async function resolveGlobalPosition(
     const signatureFiltered = filtered.filter((s: any) => {
       // 优先使用 detail 字段，它包含完整签名信息
       const signatureSource = s.detail || s.containerName || '';
-      return matchSignature(signatureSource, cmdOptions.signature);
+      return matchSignatureUnified(signatureSource, cmdOptions.signature);
     });
     
     // 如果签名过滤后有结果，使用过滤后的结果
@@ -542,18 +542,4 @@ function outputResult<T>(
   process.exit(result.success ? 0 : 1);
 }
 
-/**
- * 签名匹配（用于区分重载方法）
- */
-export function matchSignature(signatureSource: string, expectedSignature: string): boolean {
-  if (!signatureSource) return false;
-  
-  // 标准化签名格式
-  const normalize = (sig: string) => sig.replace(/\s/g, '');
-  
-  const normalizedSource = normalize(signatureSource);
-  const normalizedExpected = normalize(expectedSignature);
-  
-  // 检查是否包含预期的参数列表
-  return normalizedSource.includes(`(${normalizedExpected})`);
-}
+

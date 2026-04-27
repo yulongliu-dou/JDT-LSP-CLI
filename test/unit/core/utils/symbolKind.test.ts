@@ -4,7 +4,7 @@
  * 测试 SymbolKind 转换函数
  */
 
-import { symbolKindToString, stringToSymbolKind } from '../../../../src/core/utils/symbolKind';
+import { symbolKindToString, stringToSymbolKind, isValidSymbolKind, getSupportedSymbolKinds, getSymbolKindDisplay } from '../../../../src/core/utils/symbolKind';
 
 describe('symbolKind 转换', () => {
   describe('symbolKindToString', () => {
@@ -62,8 +62,12 @@ describe('symbolKind 转换', () => {
       expect(stringToSymbolKind('class')).toBe(5);
     });
 
-    it('应该忽略大小写 - 大写', () => {
+    it('应该忽略大小写 - 全大写', () => {
       expect(stringToSymbolKind('CLASS')).toBe(5);
+    });
+
+    it('应该忽略大小写 - 混合大小写', () => {
+      expect(stringToSymbolKind('cLaSs')).toBe(5);
     });
 
     it('应该将 Class 转换为数字', () => {
@@ -95,6 +99,60 @@ describe('symbolKind 转换', () => {
     });
   });
 
+  describe('isValidSymbolKind', () => {
+    it('应该验证有效的数字 SymbolKind', () => {
+      expect(isValidSymbolKind(1)).toBe(true);
+      expect(isValidSymbolKind(5)).toBe(true);
+      expect(isValidSymbolKind(26)).toBe(true);
+    });
+
+    it('应该拒绝无效的数字 SymbolKind', () => {
+      expect(isValidSymbolKind(0)).toBe(false);
+      expect(isValidSymbolKind(27)).toBe(false);
+      expect(isValidSymbolKind(-1)).toBe(false);
+    });
+
+    it('应该验证有效的字符串 SymbolKind', () => {
+      expect(isValidSymbolKind('Class')).toBe(true);
+      expect(isValidSymbolKind('Method')).toBe(true);
+    });
+
+    it('应该拒绝无效的字符串 SymbolKind', () => {
+      expect(isValidSymbolKind('Invalid')).toBe(false);
+      expect(isValidSymbolKind('')).toBe(false);
+    });
+  });
+
+  describe('getSupportedSymbolKinds', () => {
+    it('应该返回所有26种 SymbolKind', () => {
+      const kinds = getSupportedSymbolKinds();
+      expect(kinds.length).toBe(26);
+    });
+
+    it('应该包含核心类型', () => {
+      const kinds = getSupportedSymbolKinds();
+      expect(kinds).toContain('Class');
+      expect(kinds).toContain('Method');
+      expect(kinds).toContain('Interface');
+      expect(kinds).toContain('Field');
+      expect(kinds).toContain('Enum');
+    });
+  });
+
+  describe('getSymbolKindDisplay', () => {
+    it('应该返回数字和标签', () => {
+      const display = getSymbolKindDisplay(5);
+      expect(display.value).toBe(5);
+      expect(display.label).toBe('Class');
+    });
+
+    it('应该处理无效编号', () => {
+      const display = getSymbolKindDisplay(999);
+      expect(display.value).toBe(999);
+      expect(display.label).toBe('Unknown(999)');
+    });
+  });
+
   describe('双向转换', () => {
     it('应该支持往返转换 - 数字到字符串再到数字', () => {
       const kinds = [1, 5, 6, 8, 10, 11]; // File, Class, Method, Field, Enum, Interface
@@ -117,6 +175,14 @@ describe('symbolKind 转换', () => {
           expect(back).toBe(name);
         }
       });
+    });
+
+    it('stringToSymbolKind 大小写规范化后应能往返转换', () => {
+      // 验证 'class' -> 5 -> 'Class' 的往返
+      const num = stringToSymbolKind('class');
+      expect(num).toBe(5);
+      const back = symbolKindToString(num!);
+      expect(back).toBe('Class'); // 注意: 返回的是标准形式，不是原始输入
     });
   });
 });

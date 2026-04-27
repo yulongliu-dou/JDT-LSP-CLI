@@ -18,6 +18,18 @@ describe('enhancedCallHierarchy helpers', () => {
       expect(id.length).toBeGreaterThan(0);
     });
 
+    it('应该生成合法的 MD5 hex 格式（32位十六进制字符串）', () => {
+      const uri = 'file:///path/to/MyClass.java';
+      const methodName = 'myMethod';
+      const line = 10;
+      
+      const id = generateMethodId(uri, methodName, line);
+      
+      // MD5 hex 输出固定为32个十六进制字符
+      expect(id.length).toBe(32);
+      expect(id).toMatch(/^[0-9a-f]{32}$/);
+    });
+
     it('应该为相同输入生成相同ID', () => {
       const uri = 'file:///path/to/MyClass.java';
       const methodName = 'myMethod';

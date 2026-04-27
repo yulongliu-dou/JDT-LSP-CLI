@@ -149,6 +149,6 @@ jls impl --global --symbol Interceptor --kind Interface
 
 ## 相关命令
 
-- [definition](definition.md) - 跳转到符号定义
-- [references](references.md) - 查找符号的所有引用
-- [find](find.md) - 全局搜索符号
+- [跳转定义](definition-跳转定义.md) - 跳转到符号定义
+- [查找引用](references-查找引用.md) - 查找符号的所有引用
+- [全局符号搜索](find-全局符号搜索.md) - 全局搜索符号

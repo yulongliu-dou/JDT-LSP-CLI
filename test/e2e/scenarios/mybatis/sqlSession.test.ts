@@ -86,7 +86,7 @@ describe('MyBatis E2E - SqlSession 核心调用链（Daemon 模式）', () => {
       const output = parseJSONOutput(result.stdout);
       
       expect(output.success).toBe(true);
-      expect(output.data.calls.length).toBeGreaterThan(0);
+      expect(output.data.calls?.length).toBeGreaterThan(0);
     }, 60000);
 
     it('应该使用不同深度获取调用链', async () => {

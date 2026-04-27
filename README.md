@@ -48,26 +48,26 @@ jls ch src/main/java/org/example/Service.java --method processOrder -d 3
 
 | 命令 | 别名 | 功能 | 文档 |
 |------|------|------|------|
-| `find` | `f` | 全局符号搜索 | [📖](docs/commands/find.md) |
-| `symbols` | `sym` | 获取文件符号 | [📖](docs/commands/symbols.md) |
-| `definition` | `def` | 跳转定义 | [📖](docs/commands/definition.md) |
-| `references` | `refs` | 查找引用 | [📖](docs/commands/references.md) |
-| `hover` | | 悬停信息 | [📖](docs/commands/hover.md) |
-| `call-hierarchy` | `ch` | 调用链分析 | [📖](docs/commands/call-hierarchy.md) |
-| `implementations` | `impl` | 查找实现 | [📖](docs/commands/implementations.md) |
-| `type-definition` | `typedef` | 类型跳转 | [📖](docs/commands/type-definition.md) |
+| `find` | `f` | 全局符号搜索 | [📖](docs/commands/find-全局符号搜索.md) |
+| `symbols` | `sym` | 获取文件符号 | [📖](docs/commands/symbols-文档符号.md) |
+| `definition` | `def` | 跳转定义 | [📖](docs/commands/definition-跳转定义.md) |
+| `references` | `refs` | 查找引用 | [📖](docs/commands/references-查找引用.md) |
+| `hover` | | 悬停信息 | [📖](docs/commands/hover-悬停信息.md) |
+| `call-hierarchy` | `ch` | 调用链分析 | [📖](docs/commands/call-hierarchy-调用链分析.md) |
+| `implementations` | `impl` | 查找实现 | [📖](docs/commands/implementations-查找实现.md) |
+| `type-definition` | `typedef` | 类型跳转 | [📖](docs/commands/type-definition-类型定义.md) |
 
 #### 管理命令
 
 | 命令 | 功能 | 文档 |
 |------|------|------|
-| `daemon` | 守护进程管理 | [📖](docs/commands/daemon.md) |
-| `config` | 配置管理 | [📖](docs/commands/config.md) |
+| `daemon` | 守护进程管理 | [📖](docs/commands/daemon-守护进程管理.md) |
+| `config` | 配置管理 | [📖](docs/commands/config-配置管理.md) |
 
 ### 🔧 参考文档
 
-- [全局选项](docs/global-options.md) - 所有命令的通用选项
-- [符号定位指南](docs/commands/definition.md#符号定位选项) - 精确定位符号的方法
+- [全局选项](docs/全局选项.md) - 所有命令的通用选项
+- [符号定位指南](docs/commands/definition-跳转定义.md#符号定位选项) - 精确定位符号的方法
 
 ## 核心特性
 
@@ -188,7 +188,7 @@ npm run test:coverage
 jdt-lsp-cli/
 ├── docs/                      # 文档目录
 │   ├── commands/              # 各命令的详细文档
-│   └── global-options.md      # 全局选项文档
+│   └── 全局选项.md          # 全局选项文档
 ├── src/                       # 源代码
 │   ├── cli/                   # CLI 命令实现
 │   ├── core/                  # 核心功能

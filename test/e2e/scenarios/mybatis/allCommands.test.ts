@@ -31,7 +31,8 @@ describe('MyBatis E2E - 全命令覆盖测试（Daemon 模式）', () => {
 
       const output = parseJSONOutput(result.stdout);
       expect(output.success).toBe(true);
-      expect(output.data.length).toBeGreaterThan(0);
+      const symbolCount = output.data.symbols?.length || output.data.count || 0;
+      expect(symbolCount).toBeGreaterThan(0);
     }, 60000);
 
     it('应该搜索 Configuration 类', async () => {
@@ -58,7 +59,8 @@ describe('MyBatis E2E - 全命令覆盖测试（Daemon 模式）', () => {
 
       const output = parseJSONOutput(result.stdout);
       expect(output.success).toBe(true);
-      expect(output.data.length).toBeGreaterThan(0);
+      const symbolCount = output.data.symbols?.length || output.data.count || 0;
+      expect(symbolCount).toBeGreaterThan(0);
     }, 60000);
 
     it('应该获取 Executor 接口的符号', async () => {
@@ -135,6 +137,7 @@ describe('MyBatis E2E - 全命令覆盖测试（Daemon 模式）', () => {
       const result = await execCLIWithDaemon([
         '-p', MYBATIS_PROJECT.path,
         'hover', MYBATIS_PROJECT.files.configuration,
+        '--symbol', 'Configuration',
         '--json-compact'
       ]);
 
@@ -148,12 +151,14 @@ describe('MyBatis E2E - 全命令覆盖测试（Daemon 模式）', () => {
       const result = await execCLIWithDaemon([
         '-p', MYBATIS_PROJECT.path,
         'impl', MYBATIS_PROJECT.files.sqlSessionInterface,
+        '--symbol', 'SqlSession',
         '--json-compact'
       ]);
 
       const output = parseJSONOutput(result.stdout);
       expect(output.success).toBe(true);
-      expect(output.data.length).toBeGreaterThanOrEqual(1);
+      const implCount = output.data.implementations?.length || output.data.count || 0;
+      expect(implCount).toBeGreaterThanOrEqual(1);
     }, 60000);
   });
 

@@ -46,7 +46,7 @@ jls ch <file> --method <name> --mode lazy --fetch-source "id1,id2"
 jls ch <file> --method <name> --mode snapshot --snapshot-path ./output
 ```
 
-**详细文档**: [commands/call-hierarchy.md](docs/commands/call-hierarchy.md)
+**详细文档**: [调用链分析](docs/commands/call-hierarchy-调用链分析.md)
 
 ### 2. definition (跳转定义)
 
@@ -63,7 +63,7 @@ jls def --global --symbol ClassName --kind Class
 jls def MyClass.java --method myMethod --signature "(String, int)"
 ```
 
-**详细文档**: [commands/definition.md](docs/commands/definition.md)
+**详细文档**: [跳转定义](docs/commands/definition-跳转定义.md)
 
 ### 3. references (查找引用)
 
@@ -80,7 +80,7 @@ jls refs MyClass.java --method myMethod --no-declaration
 jls refs --global --symbol ClassName --kind Class
 ```
 
-**详细文档**: [commands/references.md](docs/commands/references.md)
+**详细文档**: [查找引用](docs/commands/references-查找引用.md)
 
 ### 4. hover (获取符号信息)
 
@@ -90,7 +90,7 @@ jls refs --global --symbol ClassName --kind Class
 jls hover MyClass.java --method myMethod
 ```
 
-**详细文档**: [commands/hover.md](docs/commands/hover.md)
+**详细文档**: [悬停信息](docs/commands/hover-悬停信息.md)
 
 ## 📚 完整命令索引目录
 
@@ -100,35 +100,35 @@ jls hover MyClass.java --method myMethod
 
 | 命令 | 别名 | 用途 | 文档链接 |
 |------|------|------|----------|
-| `definition` | `def` | 跳转到符号定义 | [详细说明](docs/commands/definition.md) |
-| `references` | `refs` | 查找符号的所有引用 | [详细说明](docs/commands/references.md) |
-| `type-definition` | `typedef` | 跳转到类型定义 | [详细说明](docs/commands/type-definition.md) |
-| `implementations` | `impl` | 查找接口实现 | [详细说明](docs/commands/implementations.md) |
-| `hover` | `hover` | 获取符号悬停信息 | [详细说明](docs/commands/hover.md) |
-| `symbols` | `sym` | 列出文件中的所有符号 | [详细说明](docs/commands/symbols.md) |
+| `definition` | `def` | 跳转到符号定义 | [详细说明](docs/commands/definition-跳转定义.md) |
+| `references` | `refs` | 查找符号的所有引用 | [详细说明](docs/commands/references-查找引用.md) |
+| `type-definition` | `typedef` | 跳转到类型定义 | [详细说明](docs/commands/type-definition-类型定义.md) |
+| `implementations` | `impl` | 查找接口实现 | [详细说明](docs/commands/implementations-查找实现.md) |
+| `hover` | `hover` | 获取符号悬停信息 | [详细说明](docs/commands/hover-悬停信息.md) |
+| `symbols` | `sym` | 列出文件中的所有符号 | [详细说明](docs/commands/symbols-文档符号.md) |
 
 ### 调用分析类
 
 | 命令 | 别名 | 用途 | 文档链接 |
 |------|------|------|----------|
-| `call-hierarchy` | `ch` | 调用链分析(核心) | [详细说明](docs/commands/call-hierarchy.md) |
+| `call-hierarchy` | `ch` | 调用链分析(核心) | [详细说明](docs/commands/call-hierarchy-调用链分析.md) |
 
 ### 搜索类
 
 | 命令 | 别名 | 用途 | 文档链接 |
 |------|------|------|----------|
-| `find` | `find` | 工作区符号搜索 | [详细说明](docs/commands/find.md) |
+| `find` | `find` | 工作区符号搜索 | [详细说明](docs/commands/find-全局符号搜索.md) |
 
 ### 系统管理类
 
 | 命令 | 别名 | 用途 | 文档链接 |
 |------|------|------|----------|
-| `daemon` | `daemon` | 守护进程管理 | [详细说明](docs/commands/daemon.md) |
-| `config` | `config` | 配置管理 | [详细说明](docs/commands/config.md) |
+| `daemon` | `daemon` | 守护进程管理 | [详细说明](docs/commands/daemon-守护进程管理.md) |
+| `config` | `config` | 配置管理 | [详细说明](docs/commands/config-配置管理.md) |
 
 ### 全局选项
 
-所有命令共享的全局选项: [global-options.md](docs/global-options.md)
+所有命令共享的全局选项: [全局选项](docs/全局选项.md)
 
 ## 🤖 AI Agent 最佳实践
 
@@ -240,4 +240,4 @@ jls -p E:\my-project ch src\Service.java --method processOrder --mode lazy -d 3
 
 **需要更多帮助?**
 - 查看完整命令文档: [docs/commands/](docs/commands/)
-- 查看全局选项: [docs/global-options.md](docs/global-options.md)
+- 查看全局选项: [docs/全局选项.md](docs/全局选项.md)

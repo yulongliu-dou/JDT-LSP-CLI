@@ -267,5 +267,5 @@ jls --project E:\my-project find MyClass
 
 ## 相关命令
 
-- [config](config.md) - 管理配置文件
+- [配置管理](config-配置管理.md) - 管理配置文件
 - 所有 LSP 命令都受益于守护进程模式

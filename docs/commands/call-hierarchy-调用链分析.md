@@ -261,6 +261,6 @@ jls ch Service.java --method process --mode snapshot --snapshot-path ./analysis
 
 ## 相关命令
 
-- [references](references.md) - 查找符号的所有引用
-- [definition](definition.md) - 跳转到符号定义
-- [implementations](implementations.md) - 查找接口的实现
+- [查找引用](references-查找引用.md) - 查找符号的所有引用
+- [跳转定义](definition-跳转定义.md) - 跳转到符号定义
+- [查找实现](implementations-查找实现.md) - 查找接口的实现
