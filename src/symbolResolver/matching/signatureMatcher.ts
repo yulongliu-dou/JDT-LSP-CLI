@@ -48,9 +48,14 @@ export function matchSignature(symbolDetail: string | undefined, querySignature:
   const querySig = normalizeSignature(querySigClean, true);
   if (symbolSig === querySig) return true;
   
-  // 部分匹配（仅当至少有一个参数时，且查询是符号的前缀）
-  // 使用 startsWith 而非 includes，更可控，避免 'int' 匹配 'String, int'
-  if (symbolSig && querySig && symbolSig.startsWith(querySig)) return true;
+  // 部分匹配（仅当参数数量相同时，允许前缀匹配用于泛型简化场景）
+  // 例: "list<string>" 的 startsWith "list" 是合理的（同参数数量，泛型简化）
+  // 但 "string" 不应 startsWith 匹配 "string,object"（不同参数数量，是不同重载）
+  if (symbolSig && querySig && symbolSig.startsWith(querySig)) {
+    const symbolParamCount = symbolSig.split(',').length;
+    const queryParamCount = querySig.split(',').length;
+    if (symbolParamCount === queryParamCount) return true;
+  }
   
   return false;
 }

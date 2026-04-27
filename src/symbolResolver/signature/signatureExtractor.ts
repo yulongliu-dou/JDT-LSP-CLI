@@ -133,8 +133,9 @@ export function extractReturnType(detail: string | undefined): string {
 /**
  * 从方法名中提取签名部分
  * 例: "resolveTypeHandler(Type, JdbcType, String)" -> "(Type, JdbcType, String)"
+ * 例: "selectOne(String) <T>" -> "(String)" （不锚定末尾，正确处理泛型后缀）
  */
 export function extractSignatureFromName(name: string): string {
-  const match = name.match(/\((.*)\)$/);
-  return match ? `(${match[1]})` : '()';
+  const sig = extractSignature(name);
+  return sig ? `(${sig})` : '()';
 }

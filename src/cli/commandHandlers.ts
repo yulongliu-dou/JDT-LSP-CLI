@@ -322,6 +322,7 @@ export function registerCallHierarchyCommand(program: Command) {
       );
     } else {
       // 新的AI友好模式
+      const isCursorMode = !!cmdOptions.cursor;
       await executeCommand(
         `/call-hierarchy/${cmdOptions.mode}`,
         {
@@ -333,6 +334,7 @@ export function registerCallHierarchyCommand(program: Command) {
           depth: cmdOptions.depth,
           incoming: cmdOptions.incoming,
           cursor: cmdOptions.cursor,
+          cursorMode: isCursorMode,
           fetchSource: cmdOptions.fetchSource,
           expandDepth: cmdOptions.expandDepth,
           snapshotPath: cmdOptions.snapshotPath,

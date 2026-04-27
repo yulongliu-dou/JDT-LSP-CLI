@@ -465,15 +465,25 @@ async function handleCallHierarchy(body: any, activeClient: any, startTime: numb
  * 处理增强版调用链请求（lazy/snapshot/summary）
  */
 async function handleEnhancedCallHierarchy(body: any, activeClient: any, project: string, startTime: number) {
-  if (!body.file) {
+  // cursor 续查模式：位置信息已在 cursor 缓存中，不需要 file/line/col
+  const isCursorMode = !!body.cursor;
+  
+  if (!isCursorMode && !body.file) {
     throw new Error('Missing parameter: file');
   }
-  // 解析位置
-  const posResult = await resolvePosition(body, activeClient);
-  if ('success' in posResult) {
-    return { error: 'position_resolution_failed', ...posResult };
+  
+  // cursor 模式跳过位置解析
+  let posLine = 0;
+  let posCol = 0;
+  
+  if (!isCursorMode) {
+    const posResult = await resolvePosition(body, activeClient);
+    if ('success' in posResult) {
+      return { error: 'position_resolution_failed', ...posResult };
+    }
+    posLine = posResult.line;
+    posCol = posResult.col;
   }
-  const { line: posLine, col: posCol } = posResult;
   
   // 复用或创建EnhancedCallHierarchyService实例
   // 这样可以保持cursor缓存在多次HTTP请求之间可用

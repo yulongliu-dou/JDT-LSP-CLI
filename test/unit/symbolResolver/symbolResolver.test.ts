@@ -91,9 +91,16 @@ describe('symbolResolver/core - 核心功能', () => {
           {
             name: 'myMethod',
             kind: 'Method',
-            detail: 'myMethod() : void',
+            detail: 'myMethod(String name) : void',
             range: { start: { line: 6, character: 4 }, end: { line: 8, character: 5 } },
             selectionRange: { start: { line: 6, character: 12 }, end: { line: 6, character: 20 } },
+          },
+          {
+            name: 'myMethod',
+            kind: 'Method',
+            detail: 'myMethod() : void',
+            range: { start: { line: 9, character: 4 }, end: { line: 11, character: 5 } },
+            selectionRange: { start: { line: 9, character: 12 }, end: { line: 9, character: 20 } },
           },
         ],
       },
@@ -120,9 +127,25 @@ describe('symbolResolver/core - 核心功能', () => {
       expect(result.success).toBe(true);
     });
 
-    it('应该用签名消除重载歧义', () => {
+    it('应该用签名消除重载歧义（单参数签名匹配单参数重载）', () => {
       const result = resolveSymbol(testSymbols, { name: 'myMethod', signature: '(String)' });
       expect(result.success).toBe(true);
+    });
+
+    it('应该用多参数签名消除重载歧义', () => {
+      const result = resolveSymbol(testSymbols, { name: 'myMethod', signature: '(String, int)' });
+      expect(result.success).toBe(true);
+    });
+
+    it('签名不应错误匹配参数数量不同的重载', () => {
+      // (String) 有1个参数，不应匹配 (String, int) 有2个参数的重载
+      const result = resolveSymbol(testSymbols, { name: 'myMethod', signature: '(String)' });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        // 应匹配 myMethod(String) 而非 myMethod(String, int)
+        // positionOptimizer 返回 1-based 行号: selectionRange.start.line(6) + 1 = 7
+        expect(result.position.line).toBe(7);
+      }
     });
 
     it('未找到符号时返回 not_found 错误', () => {

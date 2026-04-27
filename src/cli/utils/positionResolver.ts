@@ -288,6 +288,16 @@ export async function getPosition(
 ): Promise<{ filePath: string; line: string; col: string } | CLIResult<any>> {
   const projectPath = path.resolve(opts.project);
   
+  // Call-hierarchy cursor 续查模式：位置信息已在 cursor 缓存中，不需要 file/line/col
+  // 当 --cursor 存在且 mode 非 legacy 时，跳过位置解析
+  if (cmdOptions.cursor && cmdOptions.mode && cmdOptions.mode !== 'legacy') {
+    return {
+      filePath: '__cursor_mode__',
+      line: '0',
+      col: '0',
+    };
+  }
+  
   // 全局定位模式：不需要文件路径
   if (cmdOptions.global && isSymbolMode(cmdOptions)) {
     // 验证 --kind 参数（全局定位必需）
