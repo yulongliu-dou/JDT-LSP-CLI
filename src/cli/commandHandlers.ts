@@ -219,7 +219,7 @@ export function registerCallHierarchyCommand(program: Command) {
   ];
   
   let callHierarchyCmd = program
-    .command('call-hierarchy [file] [line] [col]')
+    .command('call-hierarchy [file]')
     .alias('ch')
     .description('Get call hierarchy for a method. AI-friendly modes: lazy, snapshot, summary.')
     .option('-d, --depth <n>', 'Maximum recursion depth', '3')
@@ -236,12 +236,12 @@ export function registerCallHierarchyCommand(program: Command) {
     callHierarchyCmd = callHierarchyCmd.option(opt.flags, opt.desc);
   }
   
-  callHierarchyCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
+  callHierarchyCmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
     const projectPath = path.resolve(opts.project);
     
     // 解析位置（支持符号模式）
-    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    const posResult = await getPosition(file, cmdOptions, opts);
     if ('success' in posResult) {
       outputResult(posResult, undefined, opts.jsonCompact, opts.output);
       return;
@@ -368,7 +368,9 @@ export function registerCallHierarchyCommand(program: Command) {
           }
         },
         opts,
-        'callHierarchy'
+        // AI 友好模式（lazy/snapshot/summary）使用专属命令名，使 compactData 找不到字段白名单从而原样透传，
+        // 避免通用 compact 二次裁切掉 cursor / methods / nextActions 等关键字段。
+        `callHierarchy:${cmdOptions.mode}`
       );
     }
   });

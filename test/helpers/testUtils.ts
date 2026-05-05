@@ -54,8 +54,9 @@ export const MYBATIS_PROJECT = {
  * 
  * 管理测试用的 JDT LS daemon 实例，实现：
  * - 测试间共享 daemon（避免重复启动）
- * - 自动健康检查
+ * - 自动健康检查（判项目真正就绪而非仅 HTTP 就绪）
  * - 优雅关闭和清理
+ * - 测试隔离 PID 文件路径，避免与用户生产 daemon 冲突
  */
 export class DaemonManager {
   private static instance: DaemonManager | null = null;
@@ -63,6 +64,14 @@ export class DaemonManager {
   private daemonPort: number = 3100; // 使用不同的端口避免冲突
   private isRunning: boolean = false;
   private initProject: string | null = null;
+  private cleanedUp: boolean = false;
+  private stopPromise: Promise<void> | null = null;
+  private pidFilePath: string = path.join(
+    __dirname, '..', 'test-output', `daemon-test-${process.pid}.pid`
+  );
+  private logFilePath: string = path.join(
+    __dirname, '..', 'test-output', `daemon-test-${process.pid}.log`
+  );
 
   private constructor() {}
 
@@ -74,6 +83,20 @@ export class DaemonManager {
       DaemonManager.instance = new DaemonManager();
     }
     return DaemonManager.instance;
+  }
+
+  /**
+   * 获取当前 daemon 使用的端口
+   */
+  getPort(): number {
+    return this.daemonPort;
+  }
+
+  /**
+   * 获取隔离的 PID 文件路径
+   */
+  getPidFilePath(): string {
+    return this.pidFilePath;
   }
 
   /**
@@ -90,24 +113,40 @@ export class DaemonManager {
     this.daemonPort = options.port || this.daemonPort;
     this.initProject = projectPath;
 
+    // 确保隔离 PID/日志目录存在
+    const outDir = path.dirname(this.pidFilePath);
+    if (!fs.existsSync(outDir)) {
+      fs.mkdirSync(outDir, { recursive: true });
+    }
+    // 如果上次测试残留了隔离 PID 文件，先清掉避免 daemon 启动时误判为“已运行”
+    if (fs.existsSync(this.pidFilePath)) {
+      try { fs.unlinkSync(this.pidFilePath); } catch { /* ignore */ }
+    }
+
     if (options.debug) {
       console.log(`[Daemon] Starting on port ${this.daemonPort}...`);
       console.log(`[Daemon] Project: ${projectPath}`);
+      console.log(`[Daemon] PID file: ${this.pidFilePath}`);
     }
 
     const { spawn } = await import('child_process');
     const daemonPath = path.join(__dirname, '..', '..', 'dist', 'daemon.js');
 
     return new Promise((resolve, reject) => {
-      this.daemonProcess = spawn('node', [
-        daemonPath,
-        'start',
-        '--port', String(this.daemonPort),
-        '--eager',
-        '--init-project', projectPath,
-      ], {
+      // daemon.js 直接运行时忽略 CLI 参数，只读环境变量
+      const env = {
+        ...process.env,
+        JLS_DAEMON_PORT: String(this.daemonPort),
+        JLS_DAEMON_EAGER: 'true',
+        JLS_DAEMON_PROJECT: projectPath,
+        JLS_DAEMON_PID_FILE: this.pidFilePath,
+        JLS_DAEMON_LOG_FILE: this.logFilePath,
+      };
+
+      this.daemonProcess = spawn('node', [daemonPath], {
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
+        env,
       });
 
       // 监听输出
@@ -125,7 +164,7 @@ export class DaemonManager {
         }
       });
 
-      // 等待 daemon 就绪
+      // 等待 daemon 真正就绪（项目初始化完成）
       const waitForReady = () => {
         this.checkHealth()
           .then((healthy) => {
@@ -148,37 +187,50 @@ export class DaemonManager {
       // 启动后等待 2 秒开始健康检查
       setTimeout(waitForReady, 2000);
 
-      // 超时处理
+      // 超时处理（mybatis-3 等大项目索引需更长时间，此处为项目真就绪的最终超时）
       setTimeout(() => {
         if (!this.isRunning) {
           reject(new Error(`Daemon startup timeout (port ${this.daemonPort})`));
         }
-      }, 60000); // 60秒超时
+      }, 180000); // 180 秒超时，为大项目索引留足余地
     });
   }
 
   /**
    * 健康检查
+   * 
+   * 解析 /health 返回的 JSON，仅当 data.status === 'ready' 时才视为真正就绪。
+   * 避免 DaemonManager 在 JDT LS 尚在索引阶段时就释放测试，导致首个请求超时。
    */
   async checkHealth(): Promise<boolean> {
-    if (!this.isRunning && !this.daemonProcess) {
+    if (!this.daemonProcess) {
       return false;
     }
 
     return new Promise((resolve) => {
       const req = http.get(`http://127.0.0.1:${this.daemonPort}/health`, (res) => {
-        if (res.statusCode === 200) {
-          resolve(true);
-        } else {
+        if (res.statusCode !== 200) {
           resolve(false);
+          return;
         }
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(body);
+            // 仅在项目真正就绪时返回 true
+            resolve(parsed?.data?.status === 'ready');
+          } catch {
+            resolve(false);
+          }
+        });
       });
 
       req.on('error', () => {
         resolve(false);
       });
 
-      req.setTimeout(2000, () => {
+      req.setTimeout(3000, () => {
         req.destroy();
         resolve(false);
       });
@@ -187,46 +239,77 @@ export class DaemonManager {
 
   /**
    * 停止 daemon
+   *
+   * 使用单例 Promise 防止重入；finalize 只触发一次，避免：
+   * 1) HTTP 响应回调与 setTimeout(3000) 双触发 cleanup 导致日志重复;
+   * 2) afterAll 已 resolve 后又触发 cleanup 导致 "Cannot log after tests are done"。
    */
   async stop(): Promise<void> {
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
     if (!this.isRunning) {
       return;
     }
 
     console.log('[Daemon] Stopping...');
 
-    // 通过 HTTP 接口停止
-    return new Promise((resolve) => {
+    this.stopPromise = new Promise<void>((resolve) => {
+      let finalized = false;
+      let timeoutHandle: NodeJS.Timeout | null = null;
+      const finalize = () => {
+        if (finalized) return;
+        finalized = true;
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+        this.cleanup();
+        resolve();
+      };
+
       const req = http.request(
         `http://127.0.0.1:${this.daemonPort}/shutdown`,
         { method: 'POST' },
         (res) => {
-          this.cleanup();
-          resolve();
+          // 消费 body 防止 socket 残留触发后续 error
+          res.resume();
+          res.on('end', finalize);
+          res.on('error', finalize);
         }
       );
 
-      req.on('error', () => {
-        // 如果 HTTP 请求失败，直接清理
-        this.cleanup();
-        resolve();
-      });
+      req.on('error', finalize);
 
-      req.setTimeout(3000, () => {
-        req.destroy();
-        this.cleanup();
-        resolve();
-      });
+      timeoutHandle = setTimeout(() => {
+        try { req.destroy(); } catch { /* ignore */ }
+        finalize();
+      }, 3000);
 
       req.end();
     });
+
+    return this.stopPromise;
   }
 
   /**
-   * 清理资源
+   * 清理资源（幂等）
+   *
+   * 销毁子进程 stdio 管道并 unref，确保 jest 主事件循环不再被句柄持有，
+   * 避免 "Jest did not exit one second after the test run has completed"。
    */
   private cleanup(): void {
+    if (this.cleanedUp) {
+      return;
+    }
+    this.cleanedUp = true;
+
     if (this.daemonProcess) {
+      // 释放 stdio 管道句柄（jest 主进程对 daemon 子进程的引用）
+      try { this.daemonProcess.stdin?.destroy(); } catch { /* ignore */ }
+      try { this.daemonProcess.stdout?.destroy(); } catch { /* ignore */ }
+      try { this.daemonProcess.stderr?.destroy(); } catch { /* ignore */ }
+
       try {
         // 尝试优雅关闭进程树
         if (process.platform === 'win32') {
@@ -238,7 +321,14 @@ export class DaemonManager {
       } catch (e) {
         // 忽略错误
       }
+
+      // unref 让事件循环不再因子进程而保持运行
+      try { this.daemonProcess.unref(); } catch { /* ignore */ }
       this.daemonProcess = null;
+    }
+    // 清理隔离 PID 文件（避免残留影响下次启动）
+    if (fs.existsSync(this.pidFilePath)) {
+      try { fs.unlinkSync(this.pidFilePath); } catch { /* ignore */ }
     }
     this.isRunning = false;
     this.initProject = null;
@@ -258,12 +348,12 @@ export class DaemonManager {
 
   /**
    * 重置单例（用于测试隔离）
+   *
+   * 注意：此方法假设外层已 await stop() 完成。这里仅清空单例引用，
+   * 不再二次调用 stop() 以避免与已完成的 stopPromise 重复触发。
    */
   static reset(): void {
-    if (DaemonManager.instance) {
-      DaemonManager.instance.stop();
-      DaemonManager.instance = null;
-    }
+    DaemonManager.instance = null;
   }
 }
 
@@ -460,11 +550,22 @@ export async function cleanupDaemon(): Promise<void> {
 
 /**
  * 使用 daemon 模式执行 CLI 命令（便捷函数）
+ * 
+ * 重要：通过 env 注入 JLS_DAEMON_PORT，让 CLI 子进程的 sendDaemonRequest
+ * 能连到 DaemonManager 所管理的 daemon 端口（非默认 9876）。
  */
 export async function execCLIWithDaemon(
   args: string[],
   options: { cwd?: string; env?: NodeJS.ProcessEnv; debug?: boolean } = {}
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return execCLI(args, { ...options, useDaemon: true });
+  const daemon = DaemonManager.getInstance();
+  return execCLI(args, {
+    ...options,
+    useDaemon: true,
+    env: {
+      ...options.env,
+      JLS_DAEMON_PORT: String(daemon.getPort()),
+    },
+  });
 }
 

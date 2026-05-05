@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/jdt-lsp-cli.iml" filepath="$PROJECT_DIR$/.idea/jdt-lsp-cli.iml" />
+      <module fileurl="file://$PROJECT_DIR$/test-output/snapshot/snapshot.iml" filepath="$PROJECT_DIR$/test-output/snapshot/snapshot.iml" />
+      <module fileurl="file://$PROJECT_DIR$/test-output/snapshot-test/snapshot-test.iml" filepath="$PROJECT_DIR$/test-output/snapshot-test/snapshot-test.iml" />
+    </modules>
+  </component>
+</project>

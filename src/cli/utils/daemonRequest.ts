@@ -7,6 +7,16 @@ import { DAEMON_PORT } from '../../daemon';
 import { CLIResult } from '../../core/types';
 
 /**
+ * 获取守护进程端口
+ * 优先级: process.env.JLS_DAEMON_PORT > DAEMON_PORT 常量
+ * 用于测试场景与自定义端口下 CLI 客户端与 daemon 端口对齐
+ */
+function resolveDaemonPort(): number {
+  const fromEnv = parseInt(process.env.JLS_DAEMON_PORT || '', 10);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DAEMON_PORT;
+}
+
+/**
  * 通过守护进程发送请求
  */
 export async function sendDaemonRequest(endpoint: string, body: any): Promise<CLIResult<any>> {
@@ -15,7 +25,7 @@ export async function sendDaemonRequest(endpoint: string, body: any): Promise<CL
     
     const req = http.request({
       hostname: '127.0.0.1',
-      port: DAEMON_PORT,
+      port: resolveDaemonPort(),
       path: endpoint,
       method: 'POST',
       headers: {

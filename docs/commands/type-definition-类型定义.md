@@ -11,8 +11,8 @@
 ## 语法
 
 ```bash
-jls type-definition [file] [line] [col] [options]
-jls typedef [file] [line] [col] [options]
+jls type-definition [file] [options]
+jls typedef [file] [options]
 ```
 
 ## 参数
@@ -22,8 +22,6 @@ jls typedef [file] [line] [col] [options]
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | `[file]` | string | ❌ | Java 文件路径（与 `--global` 互斥） |
-| `[line]` | number | ❌ | 行号（1-based） |
-| `[col]` | number | ❌ | 列号（1-based） |
 
 ### 选项
 
@@ -47,6 +45,8 @@ jls typedef [file] [line] [col] [options]
 
 ## 使用方式
 
+> **注意**: 坐标模式（直接指定行列号）已下线。请使用符号模式定位。
+
 ### 方式 1: 跳转到字段类型
 
 ```bash
@@ -59,12 +59,6 @@ jls typedef MyClass.java --symbol myField
 ```bash
 # 从方法跳转到其返回值类型定义
 jls typedef Service.java --method getUser
-```
-
-### 方式 3: 使用行列号
-
-```bash
-jls typedef MyClass.java 10 5
 ```
 
 ## 使用示例

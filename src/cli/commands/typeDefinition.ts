@@ -10,7 +10,7 @@ import { JdtLsClient } from '../../jdtClient';
 
 export function registerTypeDefinitionCommand(program: Command) {
   let typeDefCmd = program
-    .command('type-definition [file] [line] [col]')
+    .command('type-definition [file]')
     .alias('typedef')
     .description('Go to type definition (e.g., variable type -> class). Use --symbol for auto-positioning.')
     .option('--explain-empty', 'Explain why type definition is empty (for debugging)', false);
@@ -30,12 +30,12 @@ export function registerTypeDefinitionCommand(program: Command) {
     typeDefCmd = typeDefCmd.option(opt.flags, opt.desc);
   }
   
-  typeDefCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
+  typeDefCmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
     const projectPath = path.resolve(opts.project);
     
     // 解析位置（支持符号模式）
-    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    const posResult = await getPosition(file, cmdOptions, opts);
     if ('success' in posResult) {
       outputResult(posResult, undefined, opts.jsonCompact, opts.output);
       return;

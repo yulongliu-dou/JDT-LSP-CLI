@@ -10,7 +10,7 @@
 ## 语法
 
 ```bash
-jls hover [file] [line] [col] [options]
+jls hover [file] [options]
 ```
 
 ## 参数
@@ -20,8 +20,6 @@ jls hover [file] [line] [col] [options]
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | `[file]` | string | ❌ | Java 文件路径（与 `--global` 互斥） |
-| `[line]` | number | ❌ | 行号（1-based） |
-| `[col]` | number | ❌ | 列号（1-based） |
 
 ### 选项
 
@@ -39,13 +37,9 @@ jls hover [file] [line] [col] [options]
 
 ## 使用方式
 
-### 方式 1: 使用行列号
+> **注意**: 坐标模式（直接指定行列号）已下线。请使用符号模式定位。
 
-```bash
-jls hover MyClass.java 10 5
-```
-
-### 方式 2: 使用符号名（推荐）
+### 方式 1: 使用符号名
 
 ```bash
 # 获取方法的悬停信息
@@ -110,7 +104,7 @@ jls hover MyClass.java --symbol MyClass
 
 1. **contents 为数组**: 返回的 `contents` 是数组格式，不是单个对象
 2. **Javadoc 依赖**: 只有存在 Javadoc 注释时才会返回文档内容
-3. **符号定位**: 建议使用 `--method` 或 `--symbol` 避免手动指定行列号
+3. **符号定位**: 请使用 `--method` 或 `--symbol` 选项自动定位
 4. **性能**: 悬停信息获取通常很快（< 500ms）
 
 ## 常见用例

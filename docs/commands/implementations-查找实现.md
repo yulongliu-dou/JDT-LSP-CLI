@@ -11,8 +11,8 @@
 ## 语法
 
 ```bash
-jls implementations [file] [line] [col] [options]
-jls impl [file] [line] [col] [options]
+jls implementations [file] [options]
+jls impl [file] [options]
 ```
 
 ## 参数
@@ -22,8 +22,6 @@ jls impl [file] [line] [col] [options]
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | `[file]` | string | ❌ | Java 文件路径（与 `--global` 互斥） |
-| `[line]` | number | ❌ | 行号（1-based） |
-| `[col]` | number | ❌ | 列号（1-based） |
 
 ### 选项
 
@@ -41,12 +39,11 @@ jls impl [file] [line] [col] [options]
 
 ## 使用方式
 
+> **注意**: 坐标模式（直接指定行列号）已下线。请使用符号模式定位。
+
 ### 方式 1: 查找接口的实现
 
 ```bash
-# 定位到接口定义
-jls impl Runnable.java 10 10
-
 # 使用符号名
 jls impl Runnable.java --symbol Runnable
 ```

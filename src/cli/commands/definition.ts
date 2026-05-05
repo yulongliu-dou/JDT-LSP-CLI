@@ -10,7 +10,7 @@ import { JdtLsClient } from '../../jdtClient';
 
 export function registerDefinitionCommand(program: Command) {
   let definitionCmd = program
-    .command('definition [file] [line] [col]')
+    .command('definition [file]')
     .alias('def')
     .description('Go to definition of a symbol. Use --symbol for auto-positioning.');
   
@@ -29,12 +29,12 @@ export function registerDefinitionCommand(program: Command) {
     definitionCmd = definitionCmd.option(opt.flags, opt.desc);
   }
   
-  definitionCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
+  definitionCmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
     const projectPath = path.resolve(opts.project);
     
     // 解析位置（支持符号模式）
-    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    const posResult = await getPosition(file, cmdOptions, opts);
     if ('success' in posResult) {
       outputResult(posResult, undefined, opts.jsonCompact, opts.output);
       return;

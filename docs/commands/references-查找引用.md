@@ -11,8 +11,8 @@
 ## 语法
 
 ```bash
-jls references [file] [line] [col] [options]
-jls refs [file] [line] [col] [options]
+jls references [file] [options]
+jls refs [file] [options]
 ```
 
 ## 参数
@@ -22,8 +22,6 @@ jls refs [file] [line] [col] [options]
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | `[file]` | string | ❌ | Java 文件路径（与 `--global` 互斥） |
-| `[line]` | number | ❌ | 行号（1-based） |
-| `[col]` | number | ❌ | 列号（1-based） |
 
 ### 选项
 
@@ -47,13 +45,9 @@ jls refs [file] [line] [col] [options]
 
 ## 使用方式
 
-### 方式 1: 使用行列号
+> **注意**: 坐标模式（直接指定行列号）已下线。请使用符号模式定位。
 
-```bash
-jls refs MyClass.java 10 5
-```
-
-### 方式 2: 使用符号名（推荐）
+### 方式 1: 使用符号名
 
 ```bash
 # 查找方法的所有引用
@@ -63,14 +57,14 @@ jls refs MyClass.java --method myMethod
 jls refs MyClass.java --symbol myField
 ```
 
-### 方式 3: 排除声明本身
+### 方式 2: 排除声明本身
 
 ```bash
 # 只查找使用位置，不包含声明
 jls refs MyClass.java --method myMethod --no-declaration
 ```
 
-### 方式 4: 全局查找引用
+### 方式 3: 全局查找引用
 
 ```bash
 # 全局查找类的所有引用
@@ -154,7 +148,7 @@ jls refs --global --symbol SqlSession --kind Class
 1. **性能**: 查找引用可能较慢，尤其是在大型项目中
 2. **范围**: 默认在整个项目中搜索引用
 3. **声明包含**: 默认结果包含符号的声明位置，使用 `--no-declaration` 排除
-4. **符号定位**: 建议使用 `--method` 或 `--symbol` 避免手动指定行列号
+4. **符号定位**: 请使用 `--method` 或 `--symbol` 选项自动定位
 
 ## 常见用例
 

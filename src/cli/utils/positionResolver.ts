@@ -281,8 +281,6 @@ export async function resolveGlobalPosition(
  */
 export async function getPosition(
   file: string | undefined,
-  line: string | undefined,
-  col: string | undefined,
   cmdOptions: any,
   opts: any
 ): Promise<{ filePath: string; line: string; col: string } | CLIResult<any>> {
@@ -374,60 +372,76 @@ export async function getPosition(
     return { filePath, line: result.line, col: result.col };
   }
   
-  // 传统模式：使用行列参数
-  if (!line || !col) {
-    return {
-      success: false,
-      error: 'Position required: either provide <line> <col> or use --method/--symbol option',
-      elapsed: 0,
-    };
-  }
+  /*
+   * [已下线] 坐标模式分支（原 L377-L430）
+   * 下线日期: 2026-04-28
+   * 原因: 用户手动数行列极易出错（1-based/0-based 混淆、制表符宽度差异等），
+   *       JDT LS 对坐标精度要求极高，实测返回空结果概率高。
+   * 保留策略: 代码完整保留但注释掉，如需恢复取消注释即可。
+   * 恢复方式: 1) 取消此处注释 2) getPosition() 签名恢复 line/col 形参
+   *          3) 各命令文件恢复 .command('xxx [file] [line] [col]') 和 action 形参
+   *
+   * // 传统模式：使用行列参数
+   * if (!line || !col) {
+   *   return {
+   *     success: false,
+   *     error: 'Position required: either provide <line> <col> or use --method/--symbol option',
+   *     elapsed: 0,
+   *   };
+   * }
+   *
+   * // 验证行号和列号的有效性
+   * const lineNum = parseInt(line, 10);
+   * const colNum = parseInt(col, 10);
+   *
+   * if (isNaN(lineNum) || lineNum < 1) {
+   *   return {
+   *     success: false,
+   *     error: `Invalid line number: ${line}. Line number must be a positive integer.`,
+   *     elapsed: 0,
+   *   };
+   * }
+   *
+   * if (isNaN(colNum) || colNum < 1) {
+   *   return {
+   *     success: false,
+   *     error: `Invalid column number: ${col}. Column number must be a positive integer.`,
+   *     elapsed: 0,
+   *   };
+   * }
+   *
+   * // 检查行号是否超出文件范围
+   * try {
+   *   const fileContent = fs.readFileSync(filePath, 'utf-8');
+   *   const lines = fileContent.split('\n');
+   *   if (lineNum > lines.length) {
+   *     return {
+   *       success: false,
+   *       error: `Line number ${lineNum} exceeds file length (${lines.length} lines).`,
+   *       elapsed: 0,
+   *     };
+   *   }
+   *   const targetLine = lines[lineNum - 1];
+   *   if (colNum > targetLine.length + 1) {
+   *     return {
+   *       success: false,
+   *       error: `Column number ${colNum} exceeds line ${lineNum} length (${targetLine.length} characters).`,
+   *       elapsed: 0,
+   *     };
+   *   }
+   * } catch (error: any) {
+   *   // 如果无法读取文件，继续执行（让后续处理报错）
+   * }
+   *
+   * return { filePath, line, col };
+   */
   
-  // 验证行号和列号的有效性
-  const lineNum = parseInt(line, 10);
-  const colNum = parseInt(col, 10);
-  
-  if (isNaN(lineNum) || lineNum < 1) {
-    return {
-      success: false,
-      error: `Invalid line number: ${line}. Line number must be a positive integer.`,
-      elapsed: 0,
-    };
-  }
-  
-  if (isNaN(colNum) || colNum < 1) {
-    return {
-      success: false,
-      error: `Invalid column number: ${col}. Column number must be a positive integer.`,
-      elapsed: 0,
-    };
-  }
-  
-  // 检查行号是否超出文件范围
-  try {
-    const fileContent = fs.readFileSync(filePath, 'utf-8');
-    const lines = fileContent.split('\n');
-    if (lineNum > lines.length) {
-      return {
-        success: false,
-        error: `Line number ${lineNum} exceeds file length (${lines.length} lines).`,
-        elapsed: 0,
-      };
-    }
-    // 检查列号是否超出该行长度
-    const targetLine = lines[lineNum - 1];
-    if (colNum > targetLine.length + 1) {
-      return {
-        success: false,
-        error: `Column number ${colNum} exceeds line ${lineNum} length (${targetLine.length} characters).`,
-        elapsed: 0,
-      };
-    }
-  } catch (error: any) {
-    // 如果无法读取文件，继续执行（让后续处理报错）
-  }
-  
-  return { filePath, line, col };
+  // 未使用符号模式
+  return {
+    success: false,
+    error: 'Position required: use --symbol <name> [--signature <sig>] [--kind <kind>]',
+    elapsed: 0,
+  };
 }
 
 /**
@@ -460,21 +474,41 @@ export async function executeCommand(
   const compact = opts.jsonCompact;
   const outputFile = opts.output;  // 获取--output参数
   
+  // 构建 resolvedPosition（游标模式除外）
+  const resolvedFile = body.file;
+  const resolvedLine = body.line;
+  const resolvedCol = body.col;
+  
+  function enrichResult(result: any): any {
+    if (resolvedFile === '__cursor_mode__') return result;
+    return {
+      ...result,
+      metadata: {
+        ...(result.metadata || {}),
+        resolvedPosition: {
+          file: resolvedFile,
+          line: typeof resolvedLine === 'string' ? parseInt(resolvedLine) : resolvedLine,
+          col: typeof resolvedCol === 'string' ? parseInt(resolvedCol) : resolvedCol,
+        },
+      },
+    };
+  }
+  
   // 如果禁用了守护进程，使用直接模式
   if (opts.daemon === false) {
     try {
       const result = await directHandler();
-      outputResult({
+      outputResult(enrichResult({
         success: true,
         data: result,
         elapsed: Date.now() - startTime,
-      }, commandName, compact, outputFile);
+      }), commandName, compact, outputFile);
     } catch (error: any) {
-      outputResult({
+      outputResult(enrichResult({
         success: false,
         error: error.message,
         elapsed: Date.now() - startTime,
-      }, commandName, compact, outputFile);
+      }), commandName, compact, outputFile);
     }
     return;
   }
@@ -483,7 +517,7 @@ export async function executeCommand(
   const daemonResult = await sendDaemonRequest(endpoint, body);
   
   if (daemonResult.success || !daemonResult.error?.includes('Daemon not running')) {
-    outputResult(daemonResult, commandName, compact, outputFile);
+    outputResult(enrichResult(daemonResult), commandName, compact, outputFile);
     return;
   }
   
@@ -496,17 +530,17 @@ export async function executeCommand(
   
   try {
     const result = await directHandler();
-    outputResult({
+    outputResult(enrichResult({
       success: true,
       data: result,
       elapsed: Date.now() - startTime,
-    }, commandName, compact, outputFile);
+    }), commandName, compact, outputFile);
   } catch (error: any) {
-    outputResult({
+    outputResult(enrichResult({
       success: false,
       error: error.message,
       elapsed: Date.now() - startTime,
-    }, commandName, compact);
+    }), commandName, compact);
   }
 }
 
@@ -524,6 +558,7 @@ function outputResult<T>(
   let output = result;
   if (compact && result.data && command) {
     const metadata: any = {
+      ...(result.metadata || {}),
       compactMode: true,
     };
     

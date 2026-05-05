@@ -11,8 +11,8 @@
 ## 语法
 
 ```bash
-jls definition [file] [line] [col] [options]
-jls def [file] [line] [col] [options]
+jls definition [file] [options]
+jls def [file] [options]
 ```
 
 ## 参数
@@ -22,8 +22,6 @@ jls def [file] [line] [col] [options]
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | `[file]` | string | ❌ | Java 文件路径（与 `--global` 互斥） |
-| `[line]` | number | ❌ | 行号（1-based） |
-| `[col]` | number | ❌ | 列号（1-based） |
 
 ### 选项
 
@@ -41,13 +39,9 @@ jls def [file] [line] [col] [options]
 
 ## 使用方式
 
-### 方式 1: 使用行列号定位
+> **注意**: 坐标模式（直接指定行列号）已下线。请使用符号模式定位。
 
-```bash
-jls def src/main/java/com/example/MyClass.java 10 5
-```
-
-### 方式 2: 使用符号名定位（推荐）
+### 方式 1: 使用符号名定位
 
 ```bash
 # 定位方法
@@ -60,14 +54,14 @@ jls def MyClass.java --symbol myField
 jls def MyClass.java --method myMethod --index 0
 ```
 
-### 方式 3: 使用签名区分重载方法
+### 方式 2: 使用签名区分重载方法
 
 ```bash
 # 定位特定签名的方法
 jls def MyClass.java --method myMethod --signature "(String, int)"
 ```
 
-### 方式 4: 全局定位
+### 方式 3: 全局定位
 
 ```bash
 # 全局搜索类定义
@@ -223,7 +217,7 @@ jls def SqlSession.java --method selectOne --signature "(String)"
 
 ## 注意事项
 
-1. **行列号**: 行列号从 1 开始（不是 0）
+1. **定位方式**: 坐标模式已下线，请使用 `--method` 或 `--symbol` 选项自动定位
 2. **全局搜索限制**: `--global` 必须配合 `--symbol` 和 `--kind` 使用
 3. **JDT LS 限制**: 主要支持类级别的全局搜索，方法级别可能受限
 4. **歧义处理**: 存在多个匹配时，使用 `--index` 或 `--signature` 消歧

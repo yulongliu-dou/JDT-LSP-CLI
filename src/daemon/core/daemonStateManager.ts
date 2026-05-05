@@ -16,8 +16,26 @@ import { PACKAGE_VERSION } from '../../core/constants';
 
 // 守护进程配置
 export const DEFAULT_PORT = 9876;
-export const PID_FILE = path.join(os.homedir(), '.jdt-lsp-cli', 'daemon.pid');
-export const LOG_FILE = path.join(os.homedir(), '.jdt-lsp-cli', 'daemon.log');
+
+/**
+ * 计算 PID 文件路径
+ * 优先级: process.env.JLS_DAEMON_PID_FILE > 默认 ~/.jdt-lsp-cli/daemon.pid
+ * 用于测试/多实例场景避免与用户生产 daemon 的 PID 文件冲突
+ */
+function resolvePidFile(): string {
+  return process.env.JLS_DAEMON_PID_FILE || path.join(os.homedir(), '.jdt-lsp-cli', 'daemon.pid');
+}
+
+/**
+ * 计算日志文件路径
+ * 优先级: process.env.JLS_DAEMON_LOG_FILE > 默认 ~/.jdt-lsp-cli/daemon.log
+ */
+function resolveLogFile(): string {
+  return process.env.JLS_DAEMON_LOG_FILE || path.join(os.homedir(), '.jdt-lsp-cli', 'daemon.log');
+}
+
+export const PID_FILE = resolvePidFile();
+export const LOG_FILE = resolveLogFile();
 
 /**
  * 守护进程状态管理器类

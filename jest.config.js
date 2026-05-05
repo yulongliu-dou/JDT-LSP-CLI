@@ -44,6 +44,10 @@ module.exports = {
   },
   // 测试超时设置（E2E测试可能需要更长时间）
   testTimeout: 60000,
+  // 强制退出：daemon 子进程在 Windows 上 taskkill /T /F 后
+  // 系统层 pipe 句柄释放有亚秒级延迟，会触发 jest 的 1 秒未退出告警；
+  // afterAll 已显式调用 cleanupDaemon()，残留句柄无功能影响，强制退出更稳。
+  forceExit: true,
   // .verbose 输出
   verbose: true,
   // 设置路径映射

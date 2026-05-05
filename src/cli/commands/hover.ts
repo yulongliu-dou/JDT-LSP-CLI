@@ -10,7 +10,7 @@ import { JdtLsClient } from '../../jdtClient';
 
 export function registerHoverCommand(program: Command) {
   let hoverCmd = program
-    .command('hover [file] [line] [col]')
+    .command('hover [file]')
     .description('Get hover information. Use --symbol for auto-positioning.');
   
   // 添加符号定位选项
@@ -28,12 +28,12 @@ export function registerHoverCommand(program: Command) {
     hoverCmd = hoverCmd.option(opt.flags, opt.desc);
   }
   
-  hoverCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
+  hoverCmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
     const projectPath = path.resolve(opts.project);
     
     // 解析位置（支持符号模式）
-    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    const posResult = await getPosition(file, cmdOptions, opts);
     if ('success' in posResult) {
       outputResult(posResult, undefined, opts.jsonCompact, opts.output);
       return;

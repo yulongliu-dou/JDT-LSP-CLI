@@ -87,5 +87,8 @@ export const DAEMON_PID_FILE = PID_FILE;
 // 如果直接运行此文件，启动守护进程
 if (require.main === module) {
   const port = parseInt(process.env.JLS_DAEMON_PORT || String(DEFAULT_PORT));
-  startDaemon(port);
+  const eagerInit = process.env.JLS_DAEMON_EAGER === 'true';
+  const projectPath = process.env.JLS_DAEMON_PROJECT || undefined;
+  const jdtlsPath = process.env.JLS_DAEMON_JDTLS || undefined;
+  startDaemon(port, { eagerInit, projectPath, jdtlsPath });
 }

@@ -11,8 +11,8 @@
 ## 语法
 
 ```bash
-jls call-hierarchy [file] [line] [col] [options]
-jls ch [file] [line] [col] [options]
+jls call-hierarchy [file] [options]
+jls ch [file] [options]
 ```
 
 ## 参数
@@ -22,8 +22,6 @@ jls ch [file] [line] [col] [options]
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | `[file]` | string | ❌ | Java 文件路径（与 `--global` 互斥） |
-| `[line]` | number | ❌ | 行号（1-based） |
-| `[col]` | number | ❌ | 列号（1-based） |
 
 ### 选项
 

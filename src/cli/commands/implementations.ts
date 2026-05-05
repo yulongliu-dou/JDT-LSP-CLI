@@ -10,7 +10,7 @@ import { JdtLsClient } from '../../jdtClient';
 
 export function registerImplementationsCommand(program: Command) {
   let implementationsCmd = program
-    .command('implementations [file] [line] [col]')
+    .command('implementations [file]')
     .alias('impl')
     .description('Find implementations. Use --symbol for auto-positioning.');
   
@@ -29,12 +29,12 @@ export function registerImplementationsCommand(program: Command) {
     implementationsCmd = implementationsCmd.option(opt.flags, opt.desc);
   }
   
-  implementationsCmd.action(async (file: string, line: string | undefined, col: string | undefined, cmdOptions: any) => {
+  implementationsCmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
     const projectPath = path.resolve(opts.project);
     
     // 解析位置（支持符号模式）
-    const posResult = await getPosition(file, line, col, cmdOptions, opts);
+    const posResult = await getPosition(file, cmdOptions, opts);
     if ('success' in posResult) {
       outputResult(posResult, undefined, opts.jsonCompact, opts.output);
       return;

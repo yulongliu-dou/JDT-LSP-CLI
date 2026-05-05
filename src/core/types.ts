@@ -381,6 +381,12 @@ export interface ResponseMetadata {
     confidence: 'low' | 'medium' | 'high';
     reason: string;
   };
+  /** 符号模式解析后的精确位置 */
+  resolvedPosition?: {
+    file: string;    // 文件路径
+    line: number;    // 1-based 行号
+    col: number;     // 1-based 列号
+  };
 }
 
 export interface CLIResult<T> {
