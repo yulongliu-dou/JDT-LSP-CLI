@@ -10,6 +10,9 @@ import { JdtLsClient } from '../../jdtClient';
 import { CLIOptions, InitStage } from '../../core/types';
 import { ProjectLoadEvent } from '../../projectPool';
 import { daemonState } from '../core/daemonStateManager';
+import { load as loadDaemonConfig } from '../../libraryProvider/daemonConfigStore';
+import { listDirectDeps } from '../../libraryProvider/resolvers/mavenDependencyResolver';
+import { runDependencySources, MvnNotFoundError } from '../../libraryProvider/sources/mvnRunner';
 
 /**
  * in-flight 初始化 Promise 缓存
@@ -126,6 +129,9 @@ async function doInitClient(projectPath: string, options: Partial<CLIOptions>): 
       });
       daemonState.updateProgress('ready', 100, 'JDT LS 就绪', undefined);
       daemonState.log('JDT LS client ready for project:', projectPath, `(loaded in ${loadTime}ms)`);
+
+      // SP05：warmup 异步预取直接依赖 sources jar（非阻塞）
+      scheduleWarmup(projectPath);
     } catch (error: any) {
       daemonState.updateProgress('error', 0, '初始化失败', error.message);
       daemonState.log('Failed to initialize JDT LS:', error.message);
@@ -135,4 +141,73 @@ async function doInitClient(projectPath: string, options: Partial<CLIOptions>): 
   }
   
   return { client: activeClient, loadEvent: daemonState.getLastLoadEvent() };
+}
+
+/**
+ * SP05：warmup 异步预取直接依赖 sources jar
+ *
+ * 非阻塞，失败不阻碍主链路。
+ * 通过 daemon-config 的 warmupEnabled / libraryResolveEnabled 控制开关。
+ */
+function scheduleWarmup(workspaceRoot: string): void {
+  queueMicrotask(async () => {
+    try {
+      const config = loadDaemonConfig();
+      if (!config.libraryResolveEnabled) {
+        daemonState.log('Warmup skipped: libraryResolveEnabled=false');
+        return;
+      }
+      if (!config.warmupEnabled) {
+        daemonState.log('Warmup skipped: warmupEnabled=false');
+        return;
+      }
+
+      const deps = await listDirectDeps(workspaceRoot);
+      if (deps.length === 0) {
+        daemonState.log('Warmup skipped: no direct dependencies found');
+        return;
+      }
+
+      daemonState.log(`Warmup: downloading sources for ${deps.length} direct deps...`);
+
+      // 分批次，每批最多 20 artifact，合并为一次 mvn 调用
+      const batchSize = 20;
+      let ok = 0;
+      let fail = 0;
+      const startTime = Date.now();
+
+      for (let i = 0; i < deps.length; i += batchSize) {
+        const batch = deps.slice(i, i + batchSize);
+        try {
+          const result = await runDependencySources({
+            workspaceRoot,
+            gavs: batch,
+            excludeTransitive: true,
+            timeoutMs: 60_000,
+          });
+          if (result.ok) {
+            ok += batch.length;
+          } else {
+            fail += batch.length;
+            daemonState.log(`Warmup batch failed: ${result.stderr.slice(0, 200)}`);
+          }
+        } catch (err: any) {
+          fail += batch.length;
+          // MvnNotFoundError 不重试，直接终止
+          if (err instanceof MvnNotFoundError) {
+            daemonState.log(`Warmup aborted: ${err.message}`);
+            break;
+          }
+          daemonState.log(`Warmup batch error: ${err?.message || err}`);
+        }
+      }
+
+      const elapsed = Date.now() - startTime;
+      daemonState.log(
+        `Warmup done: ${ok} succeeded, ${fail} failed of ${deps.length} deps (${elapsed}ms)`
+      );
+    } catch (e: any) {
+      daemonState.log(`Warmup failed, non-fatal: ${e?.message || e}`);
+    }
+  });
 }

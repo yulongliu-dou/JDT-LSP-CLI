@@ -102,6 +102,15 @@ export class LspConnectionManager {
           workspaceFolders: true,
         },
       },
+      // JDT LS 专用扩展能力：声明客户端支持 `java/classFileContents`，
+      // 否则 JDT 不会返回 jdt:// URI 可解析的文本内容。
+      // 参见 SP01 Task 1.8。
+      initializationOptions: {
+        extendedClientCapabilities: {
+          classFileContentsSupport: true,
+          overrideTypeDefinition: true,
+        },
+      },
       workspaceFolders: [
         {
           uri: `file://${projectPath.replace(/\\/g, '/')}`,
@@ -303,6 +312,20 @@ export class LspConnectionManager {
     }
     
     return result;
+  }
+
+  /**
+   * 拉取 jdt:// URI 的 class 文件文本（JDT LS 扩展请求 `java/classFileContents`）。
+   *
+   * 依赖初始化时声明 `extendedClientCapabilities.classFileContentsSupport=true`。
+   * 见 SP01 Task 1.8。
+   */
+  async getClassFileContents(uri: string): Promise<string> {
+    if (!this.connection || !this.initialized) {
+      throw new Error('Not initialized');
+    }
+    const result = await this.connection.sendRequest<string>('java/classFileContents', { uri });
+    return typeof result === 'string' ? result : '';
   }
 
   /**

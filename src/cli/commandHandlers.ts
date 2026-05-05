@@ -11,6 +11,7 @@ import { SymbolQuery, ResolvedPosition, SymbolResolutionError, SymbolInfo } from
 import { getPosition, executeCommand } from './utils/positionResolver';
 import { outputResult } from './utils/outputHandler';
 import { stringToSymbolKind, symbolKindToString } from '../core/utils/symbolKind';
+import { rewriteCallItem } from '../libraryProvider/uriRewriter';
 
 /**
  * Call Hierarchy 命令实现
@@ -47,17 +48,16 @@ export async function handleCallHierarchy(
     }
     
     for (const call of calls as any[]) {
-      const target = options.incoming ? call.from : call.to;
-      if (!target.uri.includes('jdt://')) {
-        allCalls.push({
-          depth,
-          caller: options.incoming ? target.name : item.name,
-          callee: options.incoming ? item.name : target.name,
-          location: { uri: target.uri, range: target.range },
-          kind: target.kind,
-        });
-        await collectCalls(target, depth + 1);
-      }
+      // SP02：jdt:// 重写为真实 file://；未启用/失败时透传保留原 jdt:// 行为
+      const target = await rewriteCallItem(options.incoming ? call.from : call.to);
+      allCalls.push({
+        depth,
+        caller: options.incoming ? target.name : item.name,
+        callee: options.incoming ? item.name : target.name,
+        location: { uri: target.uri, range: target.range },
+        kind: target.kind,
+      });
+      await collectCalls(target, depth + 1);
     }
   }
   
@@ -292,17 +292,16 @@ export function registerCallHierarchyCommand(program: Command) {
               }
               
               for (const call of calls as any[]) {
-                const target = cmdOptions.incoming ? call.from : call.to;
-                if (!target.uri.includes('jdt://')) {
-                  allCalls.push({
-                    depth,
-                    caller: cmdOptions.incoming ? target.name : item.name,
-                    callee: cmdOptions.incoming ? item.name : target.name,
-                    location: { uri: target.uri, range: target.range },
-                    kind: target.kind,
-                  });
-                  await collectCalls(target, depth + 1);
-                }
+                // SP02：jdt:// 重写为真实 file://；未启用/失败时透传保留原 jdt:// 行为
+                const target = await rewriteCallItem(cmdOptions.incoming ? call.from : call.to);
+                allCalls.push({
+                  depth,
+                  caller: cmdOptions.incoming ? target.name : item.name,
+                  callee: cmdOptions.incoming ? item.name : target.name,
+                  location: { uri: target.uri, range: target.range },
+                  kind: target.kind,
+                });
+                await collectCalls(target, depth + 1);
               }
             }
             

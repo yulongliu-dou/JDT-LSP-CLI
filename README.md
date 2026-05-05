@@ -13,6 +13,7 @@ JDT LSP CLI 是一个基于 Eclipse JDT Language Server 的命令行工具，为
 - 📍 **精确定位**: 跳转到定义、查找引用、类型跳转
 - 🔗 **调用链分析**: 分析方法调用关系，支持多种模式
 - 📚 **文档提取**: 获取 Javadoc 和类型信息
+- 📦 **jar 内类定位**: 自动解析 jdt:// URI 为真实 file:// 缓存文件，支持 JDK src.zip、Maven sources jar、Vineflower 反编译三级管道
 - ⚡ **守护进程**: 快速响应，性能提升 10-100 倍
 
 ## 快速开始
@@ -63,6 +64,7 @@ jls ch src/main/java/org/example/Service.java --method processOrder -d 3
 |------|------|------|
 | `daemon` | 守护进程管理 | [📖](docs/commands/daemon-守护进程管理.md) |
 | `config` | 配置管理 | [📖](docs/commands/config-配置管理.md) |
+| `cache` | 缓存与源码定位 | [📖](docs/commands/library-缓存与源码定位.md) |
 
 ### 🔧 参考文档
 
@@ -88,6 +90,27 @@ jls def MyClass.java --method process --index 0
 # 全局搜索
 jls def --global --symbol ArrayList --kind Class
 ```
+
+### 📦 缓存与源码定位
+
+自动解析 JDT LS 返回的 jdt:// URI 为真实可读的 file:// 缓存文件，三级管道按优先级：
+
+1. **JDK 快速通道**: 从 `src.zip` 抽取 JDK 标准库源码（`lineMapping: exact`）
+2. **Maven sources**: 从 Maven 仓库下载 `-sources.jar`（`lineMapping: exact`）
+3. **Vineflower 反编译**: 对无 sources 的依赖全量反编译（`lineMapping: best-effort`）
+
+```bash
+# 查看缓存统计
+jls cache stats
+
+# 清理过期缓存
+jls cache clean --stale
+
+# 预热项目依赖
+jls cache warm
+```
+
+详见 [缓存与源码定位](docs/commands/library-缓存与源码定位.md)。
 
 ### ⚡ 守护进程模式
 
@@ -157,7 +180,7 @@ jls refs src/main/java/com/example/UserService.java --method processOrder
 
 ## 测试
 
-本项目包含完整的测试套件（115+ 用例），覆盖单元测试和 E2E 测试：
+本项目包含完整的测试套件（130+ 用例），覆盖单元测试、集成测试和 E2E 测试：
 
 ```bash
 # 运行单元测试（快速，~0.5秒）

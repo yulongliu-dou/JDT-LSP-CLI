@@ -15,6 +15,7 @@ import { CallHierarchyItem, CallHierarchyQuery, MethodNode, SnapshotCallHierarch
 import { LspConnectionManager } from '../../../jdt/lspConnection';
 import { CallTreeBuilder } from '../tree/callTreeBuilder';
 import { createMethodNode, extractSourceCode } from '../core/nodeFactory';
+import { rewriteCallItem } from '../../../libraryProvider/uriRewriter';
 
 /**
  * Snapshot模式处理器类
@@ -70,7 +71,22 @@ export class SnapshotModeHandler {
     fs.writeFileSync(indexPath, indexContent, 'utf-8');
 
     // 生成源码文件
-    const methodsWithPaths = Array.from(visited.values()).filter(m => m.uri.startsWith('file://'));
+    // SP02：原先 filter(m => m.uri.startsWith('file://')) 直接抛弃 jdt://，
+    //       现改为逐条重写（幂等：file:// 透传，jdt:// 调 locator），
+    //       再按 file:// 筛选为导入 sources/ 目录的条目。
+    const rewrittenMethods: MethodNode[] = [];
+    for (const m of visited.values()) {
+      const rewrittenItem = await rewriteCallItem({
+        name: m.name,
+        kind: m.kind,
+        detail: m.detail,
+        uri: m.uri,
+        range: m.range,
+        selectionRange: m.range,
+      });
+      rewrittenMethods.push({ ...m, uri: rewrittenItem.uri });
+    }
+    const methodsWithPaths = rewrittenMethods.filter(m => m.uri.startsWith('file://'));
     for (const method of methodsWithPaths) {
       const sourceFile = path.join(sourceDirPath, `${method.id}.java`);
       const sourceCode = extractSourceCode(method);

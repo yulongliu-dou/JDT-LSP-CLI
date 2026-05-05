@@ -569,3 +569,123 @@ export async function execCLIWithDaemon(
   });
 }
 
+// ============================================================
+// SP06: 平台/环境检测辅助函数
+// ============================================================
+
+/**
+ * 检测当前进程是否有 symlink/junction 创建权限。
+ *
+ * Windows 非管理员用户默认无法创建 symlink（需 SeCreateSymbolicLinkPrivilege），
+ * 此时返回 true（应跳过依赖 symlink 的测试）。
+ *
+ * macOS / Linux 通常支持 symlink，返回 false（不跳过）。
+ */
+export function skipIfNoSymlinkPermission(): boolean {
+  if (process.platform !== 'win32') {
+    // 非 Windows 通常支持 symlink
+    return false;
+  }
+  // Windows：尝试创建一个临时 junction 测试权限
+  const testDir = path.join(__dirname, '..', 'test-output', '_symlink_test');
+  const testTarget = path.join(__dirname, '..', 'test-output', '_symlink_target');
+  try {
+    if (!fs.existsSync(testTarget)) {
+      fs.mkdirSync(testTarget, { recursive: true });
+    }
+    if (fs.existsSync(testDir)) {
+      try { fs.rmdirSync(testDir); } catch { /* ignore */ }
+    }
+    // 尝试创建 junction（Windows 特有）
+    fs.symlinkSync(testTarget, testDir, 'junction');
+    // 成功 → 有权限
+    try { fs.unlinkSync(testDir); } catch { /* ignore */ }
+    try { fs.rmdirSync(testTarget, { recursive: true }); } catch { /* ignore */ }
+    return false;
+  } catch (err: any) {
+    // EPERM 或类似错误 → 无权限
+    try { fs.rmdirSync(testTarget, { recursive: true }); } catch { /* ignore */ }
+    if (err.code === 'EPERM' || err.code === 'EACCES' || err.message?.includes('privilege')) {
+      return true;
+    }
+    // 其他未知错误，保守跳过
+    return true;
+  }
+}
+
+/**
+ * 检测 `mvn` 命令是否可用。
+ * 不可用时返回 true（应跳过依赖 mvn 的测试）。
+ */
+export function skipIfNoMvn(): boolean {
+  try {
+    const { execSync } = require('child_process');
+    const cmd = process.platform === 'win32' ? 'where mvn' : 'which mvn';
+    execSync(cmd, { stdio: 'ignore', timeout: 5000 });
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 检测 JAVA_HOME 路径。
+ *
+ * 优先级：
+ * 1. 环境变量 JAVA_HOME
+ * 2. 环境变量 JDT_LS_JAVA_HOME（JDT LS 专用）
+ * 3. Windows: 常见安装路径探测
+ * 4. 回退到 `java` 命令推导
+ *
+ * 返回绝对路径或 null。
+ */
+export function detectJavaHome(): string | null {
+  // 1. 环境变量
+  const fromEnv = process.env.JAVA_HOME || process.env.JDT_LS_JAVA_HOME;
+  if (fromEnv && fs.existsSync(fromEnv)) {
+    return path.resolve(fromEnv);
+  }
+
+  // 2. Windows 常见路径
+  if (process.platform === 'win32') {
+    const candidates = [
+      'C:\\Program Files\\Java\\jdk-21',
+      'C:\\Program Files\\Java\\jdk-17',
+      'C:\\Program Files\\Java\\jdk-11',
+      'C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.0.0-hotspot',
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
+    // 扫描 C:\Program Files\Java\
+    try {
+      const javaDir = 'C:\\Program Files\\Java';
+      if (fs.existsSync(javaDir)) {
+        const entries = fs.readdirSync(javaDir);
+        const jdkDirs = entries
+          .filter(e => e.startsWith('jdk') && fs.existsSync(path.join(javaDir, e, 'bin', 'java.exe')))
+          .sort()
+          .reverse();
+        if (jdkDirs.length > 0) return path.join(javaDir, jdkDirs[0]);
+      }
+    } catch { /* ignore */ }
+  }
+
+  // 3. 尝试通过 `java` 命令推导（Unix）
+  try {
+    const { execSync } = require('child_process');
+    const javaHome = execSync('java -XshowSettings:properties -version 2>&1 | grep "java.home"', { timeout: 5000 })
+      .toString()
+      .trim();
+    const match = javaHome.match(/java\.home\s*=\s*(.+)/);
+    if (match && match[1]) {
+      const trimmed = match[1].trim();
+      // 去除 jre 后缀（JDK 的 java.home 可能指向 jre 子目录）
+      const jdkPath = trimmed.replace(/[\/]jre$/, '');
+      if (fs.existsSync(jdkPath)) return jdkPath;
+    }
+  } catch { /* ignore */ }
+
+  return null;
+}
+

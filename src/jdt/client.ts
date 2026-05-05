@@ -245,6 +245,17 @@ export class JdtLsClient {
   }
 
   /**
+   * 拉取 jdt:// URI 的 class 文件文本内容
+   *
+   * 通过 JDT LS 的扩展请求 `java/classFileContents` 获取。
+   * 依赖初始化时声明 `classFileContentsSupport`。
+   * 见 SP01 Task 1.8。
+   */
+  async getClassFileContents(uri: string): Promise<string> {
+    return this.connectionManager.getClassFileContents(uri);
+  }
+
+  /**
    * 停止 JDT LS
    */
   async stop(): Promise<void> {

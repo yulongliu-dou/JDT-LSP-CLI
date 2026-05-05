@@ -26,6 +26,9 @@ import { loadConfig } from './jdtClient';
 import { daemonState, DEFAULT_PORT, PID_FILE, LOG_FILE } from './daemon/core/daemonStateManager';
 import { createHttpServer } from './daemon/http/httpServer';
 import { ProjectPool } from './projectPool';
+// SP05：定时清理
+import { cleanStale } from './libraryProvider/cache/cacheCleaner';
+import { load as loadDaemonConfig } from './libraryProvider/daemonConfigStore';
 
 /**
  * 启动守护进程
@@ -64,6 +67,9 @@ export function startDaemon(port: number = DEFAULT_PORT, options?: { eagerInit?:
   
   // 创建并启动 HTTP 服务器
   createHttpServer(port, options);
+
+  // SP05：启动缓存定时清理（30s 后首次，之后每 12h）
+  scheduleCacheCleanup();
 }
 
 /**
@@ -83,6 +89,37 @@ export function stopDaemon(): boolean {
 // 默认端口导出
 export const DAEMON_PORT = DEFAULT_PORT;
 export const DAEMON_PID_FILE = PID_FILE;
+
+/**
+ * SP05：缓存定时清理
+ *
+ * daemon 启动 30s 后执行首次清理，之后每 12h 重复。
+ * cacheTtlDays=0 时 cleanStale 内部直接返回。
+ */
+function scheduleCacheCleanup(): void {
+  setTimeout(() => {
+    const run = async () => {
+      try {
+        const config = loadDaemonConfig();
+        if (config.cacheTtlDays > 0) {
+          const report = await cleanStale(config.cacheTtlDays);
+          if (report.removed > 0) {
+            daemonState.log(`Cache cleanup: removed ${report.removed} stale scope(s) of ${report.scanned} scanned`);
+          }
+        }
+      } catch (e: any) {
+        daemonState.log(`Cache cleanup error: ${e?.message || e}`);
+      }
+    };
+
+    run().catch(() => {});
+
+    // 每 12h 再跑一次
+    setInterval(() => {
+      run().catch(() => {});
+    }, 12 * 60 * 60 * 1000);
+  }, 30_000);
+}
 
 // 如果直接运行此文件，启动守护进程
 if (require.main === module) {

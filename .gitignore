@@ -6,3 +6,5 @@ test-reports
 # Jest 缓存（方案 F）
 .jest-cache/
 coverage/
+# vendor/ 目录保留 jar，不忽略
+!vendor/*.jar

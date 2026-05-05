@@ -435,19 +435,28 @@ export interface CompactFieldConfig {
 
 /**
  * 默认紧凑输出字段（每个命令只保留核心字段）
+ *
+ * SP02：在 definition / references / implementations / typeDefinition / callHierarchy 等
+ * 与 jar 类重写相关的命令中新增以下字段：
+ *   - originalUri：重写前的 jdt:// URI
+ *   - originalRange：重写前的范围
+ *   - source：源码来源（jdk-src / sources-jar / decompiled / class-file-contents）
+ *   - note：补充说明（如“fallback: java/classFileContents”）
+ *   - lockWaitMs：锁等待耗时
+ *   - lineMapping：exact / best-effort / n/a
  */
 export const COMPACT_FIELDS: CompactFieldConfig = {
-  definition: ['uri', 'range.start.line', 'range.start.character'],
-  references: ['uri', 'range.start.line'],
-  refs: ['uri', 'range.start.line'],  // 别名支持
+  definition: ['uri', 'range.start.line', 'range.start.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
+  references: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
+  refs: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
   symbols: ['name', 'kind', 'range.start.line'],
   sym: ['name', 'kind', 'range.start.line'],  // 别名支持
-  callHierarchy: ['entry', 'calls', 'totalMethods'],
+  callHierarchy: ['entry', 'calls', 'totalMethods', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   hover: ['contents'],
-  implementations: ['uri', 'range.start.line'],
-  impl: ['uri', 'range.start.line'],  // 别名支持
-  typeDefinition: ['uri', 'range.start.line'],
-  typedef: ['uri', 'range.start.line'],  // 别名支持
+  implementations: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
+  impl: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
+  typeDefinition: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
+  typedef: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
   workspaceSymbols: ['name', 'kind', 'location.uri', 'location.range.start.line'],
   find: ['name', 'kind', 'location.uri', 'location.range.start.line'],  // 别名支持
   f: ['name', 'kind', 'location.uri', 'location.range.start.line'],  // 别名支持

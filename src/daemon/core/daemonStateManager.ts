@@ -13,6 +13,8 @@ import * as os from 'os';
 import { InitProgress, InitStage, ProjectLoadState } from '../../core/types';
 import { ProjectLoadEvent } from '../../projectPool';
 import { PACKAGE_VERSION } from '../../core/constants';
+import { LibraryClassLocator } from '../../libraryProvider/core/libraryClassLocator';
+import { load as loadDaemonConfig } from '../../libraryProvider/daemonConfigStore';
 
 // 守护进程配置
 export const DEFAULT_PORT = 9876;
@@ -49,6 +51,11 @@ export class DaemonStateManager {
   private lastLoadEvent: ProjectLoadEvent | undefined;
   private callHierarchyService: any = null;
   private callHierarchyServiceProject: string | null = null;
+
+  // SP05：LibraryClassLocator 单例（跨请求复用）
+  private libraryLocator?: LibraryClassLocator;
+  /** 非致命警告（symlink 降级等），供 /status 端点返回 */
+  public warnings: string[] = [];
 
   // 初始化进度追踪
   private initProgress: InitProgress = {
@@ -121,7 +128,32 @@ export class DaemonStateManager {
     this.callHierarchyServiceProject = project;
   }
   getCallHierarchyServiceProject() { return this.callHierarchyServiceProject; }
-  
+
+  /**
+   * 获取 LibraryClassLocator 单例（SP05）
+   *
+   * 首次调用时创建实例，后续复用。
+   * 通过 daemonConfigStore 加载配置，通过 LSP client 提供 classFileContents。
+   */
+  getLibraryLocator(): LibraryClassLocator {
+    if (!this.libraryLocator) {
+      const config = loadDaemonConfig();
+      this.libraryLocator = new LibraryClassLocator({
+        fetcher: {
+          getClassFileContents: (uri: string) => this.client.getClassFileContents(uri),
+        },
+        config,
+        onWarning: (msg) => {
+          // 限制警告总数，防止内存泄漏
+          if (this.warnings.length < 200) {
+            this.warnings.push(msg);
+          }
+        },
+      });
+    }
+    return this.libraryLocator;
+  }
+
   getInitProgress() { return this.initProgress; }
   getInitStartTime() { return this.initStartTime; }
   setInitStartTime(time: number) { this.initStartTime = time; }

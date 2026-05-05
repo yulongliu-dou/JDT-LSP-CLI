@@ -12,6 +12,7 @@
 import { LspConnectionManager } from '../jdt/lspConnection';
 import { SymbolService } from './symbolService';
 import { SymbolInfo, Location } from '../core/types';
+import { rewriteLocations } from '../libraryProvider/uriRewriter';
 
 /**
  * 导航结果
@@ -57,7 +58,7 @@ export class NavigationService {
       }
 
       // 处理返回结果（可能是 Location 或 Location[]）
-      const locations = this.normalizeLocations(definition);
+      const locations = await this.normalizeLocations(definition);
       
       return {
         locations,
@@ -84,7 +85,7 @@ export class NavigationService {
         };
       }
 
-      const locations = this.normalizeLocations(implementation);
+      const locations = await this.normalizeLocations(implementation);
       
       return {
         locations,
@@ -110,7 +111,7 @@ export class NavigationService {
         };
       }
 
-      const locations = this.normalizeLocations(typeDefinition);
+      const locations = await this.normalizeLocations(typeDefinition);
       
       return {
         locations,
@@ -141,7 +142,7 @@ export class NavigationService {
         };
       }
 
-      const locations = this.normalizeLocations(references);
+      const locations = await this.normalizeLocations(references);
       
       // 过滤声明
       if (!includeDeclaration) {
@@ -213,21 +214,23 @@ export class NavigationService {
 
   /**
    * 规范化 Location 数组
+   *
+   * SP02：返回前统一经由 rewriteLocations 把 jdt:// 重写为真实 file://。
    */
-  private normalizeLocations(result: any): Location[] {
+  private async normalizeLocations(result: any): Promise<Location[]> {
     if (!result) return [];
-    
+
+    let arr: Location[];
     // 单个 Location
     if (result.uri && result.range) {
-      return [result as Location];
+      arr = [result as Location];
+    } else if (Array.isArray(result)) {
+      arr = result as Location[];
+    } else {
+      return [];
     }
-    
-    // Location 数组
-    if (Array.isArray(result)) {
-      return result as Location[];
-    }
-    
-    return [];
+
+    return await rewriteLocations(arr);
   }
 
   /**

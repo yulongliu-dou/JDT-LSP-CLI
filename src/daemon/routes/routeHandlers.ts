@@ -13,6 +13,12 @@ import { resolvePosition } from '../services/positionResolver';
 import { diagnoseProjectMismatch } from '../services/diagnostics';
 import { CLIResult, InitStage, ProjectLoadState } from '../../core/types';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
+import { rewriteCallItem } from '../../libraryProvider/uriRewriter';
+// SP05：daemon 级 cache / library / config 端点
+import { cleanStale, cleanAll } from '../../libraryProvider/cache/cacheCleaner';
+import { save as saveDaemonConfig, load as loadDaemonConfig } from '../../libraryProvider/daemonConfigStore';
+import { collectStats } from '../../libraryProvider/cache/cacheStats';
+import { setLibraryLocator } from '../../libraryProvider/uriRewriter';
 
 /**
  * 设置请求路由器
@@ -41,6 +47,27 @@ export async function setupRequestRouter(req: http.IncomingMessage, res: http.Se
     // 列出所有活跃项目（不需要 project 参数）
     if (pathname === '/projects') {
       await handleProjects(res, startTime);
+      return;
+    }
+
+    // SP05：cache / library / config 端点（无需 project 参数，但有 body）
+    if (pathname === '/cache/stats') {
+      await handleCacheStats(res, startTime);
+      return;
+    }
+    if (pathname === '/cache/clean') {
+      const cleanBody = await parseBody(req);
+      await handleCacheClean(cleanBody, res, startTime);
+      return;
+    }
+    if (pathname === '/library/resolve') {
+      const resolveBody = await parseBody(req);
+      await handleLibraryResolve(resolveBody, res, startTime);
+      return;
+    }
+    if (pathname === '/config') {
+      const configBody = await parseBody(req);
+      await handleConfig(configBody, res, startTime);
       return;
     }
     
@@ -226,6 +253,7 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
     overallStatus = stageMap[initProgress.stage];
   }
 
+  const config = loadDaemonConfig();
   sendResponse(res, {
     success: true,
     data: {
@@ -235,6 +263,9 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
       uptime: process.uptime(),
       pid: process.pid,
       version: '1.0.0',
+      // SP05：warnings + library resolve 开关
+      warnings: daemonState.warnings.slice(-10),
+      libraryResolveEnabled: config.libraryResolveEnabled,
     },
     elapsed: Date.now() - startTime,
   });
@@ -439,17 +470,16 @@ async function handleCallHierarchy(body: any, activeClient: any, startTime: numb
     }
     
     for (const call of calls) {
-      const target = incoming ? call.from : call.to;
-      if (!target.uri.includes('jdt://')) {
-        allCalls.push({
-          depth,
-          caller: incoming ? target.name : item.name,
-          callee: incoming ? item.name : target.name,
-          location: { uri: target.uri, range: target.range },
-          kind: symbolKindToString(target.kind),
-        });
-        await collectCalls(target, depth + 1);
-      }
+      // SP02：jdt:// 重写为真实 file://；未启用/失败时透传保留原 jdt:// 行为
+      const target = await rewriteCallItem(incoming ? call.from : call.to);
+      allCalls.push({
+        depth,
+        caller: incoming ? target.name : item.name,
+        callee: incoming ? item.name : target.name,
+        location: { uri: target.uri, range: target.range },
+        kind: symbolKindToString(target.kind),
+      });
+      await collectCalls(target, depth + 1);
     }
   }
   
@@ -572,6 +602,156 @@ async function handleTypeDefinition(body: any, activeClient: any, startTime: num
       count: 0, 
       error: error.message || 'Failed to get type definition' 
     };
+  }
+}
+
+// ========== SP05 新增端点：cache / library / config ==========
+
+/**
+ * 缓存统计
+ */
+async function handleCacheStats(res: http.ServerResponse, startTime: number) {
+  const stats = collectStats();
+  sendResponse(res, {
+    success: true,
+    data: {
+      totalBytes: stats.totalBytes,
+      buckets: stats.buckets,
+      scopeCount: Object.values(stats.buckets).reduce((sum, b) => sum + b.scopeCount, 0),
+      oldestAccess: Object.values(stats.buckets)
+        .map(b => b.oldestAccess)
+        .filter((t): t is number => t !== null)
+        .reduce((min, t) => Math.min(min, t), Infinity) || null,
+      latestAccess: Object.values(stats.buckets)
+        .map(b => b.newestAccess)
+        .filter((t): t is number => t !== null)
+        .reduce((max, t) => Math.max(max, t), -Infinity) || null,
+    },
+    elapsed: Date.now() - startTime,
+  });
+}
+
+/**
+ * 缓存清理
+ * body: { mode: 'stale' | 'all', ttlDays?: number }
+ */
+async function handleCacheClean(body: any, res: http.ServerResponse, startTime: number) {
+  try {
+    const mode: string = body.mode || 'stale';
+    let report: { scanned: number; removed: number; removedScopes: string[] };
+
+    if (mode === 'all') {
+      report = await cleanAll();
+    } else {
+      const config = loadDaemonConfig();
+      const ttlDays = typeof body.ttlDays === 'number' && body.ttlDays > 0
+        ? body.ttlDays
+        : config.cacheTtlDays;
+      if (ttlDays <= 0) {
+        sendResponse(res, {
+          success: true,
+          data: { scanned: 0, removed: 0, message: 'TTL is 0, nothing cleaned' },
+          elapsed: Date.now() - startTime,
+        });
+        return;
+      }
+      report = await cleanStale(ttlDays);
+    }
+
+    sendResponse(res, {
+      success: true,
+      data: report,
+      elapsed: Date.now() - startTime,
+    });
+  } catch (err: any) {
+    sendResponse(res, {
+      success: false,
+      error: err?.message || 'cache clean failed',
+      elapsed: Date.now() - startTime,
+    });
+  }
+}
+
+/**
+ * Library 类解析
+ * body: { jdtUri: string, range?: { start: { line, character }, end: { line, character } } }
+ */
+async function handleLibraryResolve(body: any, res: http.ServerResponse, startTime: number) {
+  try {
+    const jdtUri: string = body.jdtUri;
+    if (!jdtUri) {
+      sendResponse(res, {
+        success: false,
+        error: 'Missing parameter: jdtUri',
+        elapsed: Date.now() - startTime,
+      });
+      return;
+    }
+
+    // 确保 uriRewriter 已注入 locator
+    setLibraryLocator(daemonState.getLibraryLocator());
+
+    const defaultRange = {
+      start: { line: 0, character: 0 },
+      end: { line: 0, character: 0 },
+    };
+    const range = body.range || defaultRange;
+
+    const locator = daemonState.getLibraryLocator();
+    const resolved = await locator.resolve(jdtUri, range);
+
+    sendResponse(res, {
+      success: true,
+      data: resolved,
+      elapsed: Date.now() - startTime,
+    });
+  } catch (err: any) {
+    sendResponse(res, {
+      success: false,
+      error: err?.message || 'library resolve failed',
+      elapsed: Date.now() - startTime,
+    });
+  }
+}
+
+/**
+ * 配置热更新
+ * body: { key: string, value: unknown }
+ *
+ * 写入 daemon-config.json 并刷新内部 ConfigStore 缓存。
+ */
+async function handleConfig(body: any, res: http.ServerResponse, startTime: number) {
+  try {
+    const key: string = body.key;
+    const value: unknown = body.value;
+
+    if (!key) {
+      sendResponse(res, {
+        success: false,
+        error: 'Missing parameter: key',
+        elapsed: Date.now() - startTime,
+      });
+      return;
+    }
+
+    const partial: Record<string, unknown> = { [key]: value };
+    const updated = saveDaemonConfig(partial as any);
+
+    // 刷新 uriRewriter 内部配置缓存
+    const { refreshRewriterConfig } = await import('../../libraryProvider/uriRewriter');
+    refreshRewriterConfig();
+
+    sendResponse(res, {
+      success: true,
+      data: { key, value, updated },
+      elapsed: Date.now() - startTime,
+    });
+  } catch (err: any) {
+    sendResponse(res, {
+      success: false,
+      error: err?.message || 'config update failed',
+      elapsed: Date.now() - startTime,
+    });
   }
 }
 

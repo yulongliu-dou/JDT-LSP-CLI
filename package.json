@@ -49,6 +49,7 @@
   },
   "files": [
     "dist/",
+    "vendor/",
     "README.md",
     "LICENSE"
   ],

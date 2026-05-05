@@ -15,6 +15,7 @@ import { registerWorkspaceSymbolsCommand } from './commands/workspaceSearch';
 import { registerTypeDefinitionCommand } from './commands/typeDefinition';
 import { registerImplementationsCommand } from './commands/implementations';
 import { registerHoverCommand } from './commands/hover';
+import { registerCache } from './commands/cache';
 
 /**
  * 注册所有 CLI 命令
@@ -35,4 +36,7 @@ export function registerAllCommands(program: Command): void {
   registerTypeDefinitionCommand(program);
   registerImplementationsCommand(program);
   registerHoverCommand(program);
+
+  // 注册 cache 命令（SP04）
+  registerCache(program);
 }

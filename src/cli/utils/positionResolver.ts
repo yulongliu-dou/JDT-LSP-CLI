@@ -4,6 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'node:url';
 import { JdtLsClient } from '../../jdtClient';
 import { SymbolInfo, CLIResult } from '../../core/types';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult, matchSignature as matchSignatureUnified } from '../../symbolResolver';
@@ -265,7 +266,22 @@ export async function resolveGlobalPosition(
   
   // 提取位置
   const uri = selected.location?.uri || '';
-  const filePath = uri.replace('file://', '').replace(/^\/([A-Za-z]:)/, '$1'); // Windows 路径修复
+  // SP02：jdt:// URI 无法被本工具直接操作，提示启用 library-resolve
+  if (uri.startsWith('jdt:')) {
+    return {
+      success: false,
+      error: 'positionResolver received jdt:// uri; enable library-resolve (set libraryResolveEnabled=true in ~/.lsp-cache/daemon-config.json) to support jar classes',
+      elapsed: 0,
+    };
+  }
+  // SP02：用 fileURLToPath 代替简单的 replace('file://', '')，正确处理 Windows 驱动器和 URL 编码
+  let filePath: string;
+  try {
+    filePath = uri ? fileURLToPath(uri) : '';
+  } catch {
+    // 非 URL 形式（理论上不应发生）：降级为原无虐处理
+    filePath = uri.replace('file://', '').replace(/^\/([A-Za-z]:)/, '$1');
+  }
   const line = (selected.location?.range?.start?.line || 0) + 1;
   const col = (selected.location?.range?.start?.character || 0) + 1;
   

@@ -10,6 +10,7 @@
 import { CallHierarchyItem, MethodNode } from '../../../core/types';
 import { LspConnectionManager } from '../../../jdt/lspConnection';
 import { createMethodNode, findMethodIdByItem, toCallHierarchyItem } from '../core/nodeFactory';
+import { rewriteCallItem } from '../../../libraryProvider/uriRewriter';
 
 /**
  * 调用树构建器类
@@ -44,10 +45,8 @@ export class CallTreeBuilder {
     const parentId = findMethodIdByItem(cursor.visited, item);
 
     for (const call of (calls || []) as any[]) {
-      const target = cursor.direction === 'outgoing' ? call.to : call.from;
-      
-      // 跳过jdt://虚拟URI(外部依赖)
-      if (target.uri.includes('jdt://')) continue;
+      // SP02：原先跳过 jdt://，现重写为真实 file://；失败/未启用则保持原 jdt://
+      const target = await rewriteCallItem(cursor.direction === 'outgoing' ? call.to : call.from);
 
       const methodNode = createMethodNode(target, parentDepth + 1, parentId);
       
@@ -90,9 +89,8 @@ export class CallTreeBuilder {
     const parentId = findMethodIdByItem(visited, item);
 
     for (const call of (calls || []) as any[]) {
-      const target = direction === 'outgoing' ? call.to : call.from;
-      
-      if (target.uri.includes('jdt://')) continue;
+      // SP02：原先跳过 jdt://，现重写为真实 file://；失败/未启用则保持原 jdt://
+      const target = await rewriteCallItem(direction === 'outgoing' ? call.to : call.from);
 
       const methodNode = createMethodNode(target, currentDepth + 1, parentId);
       
