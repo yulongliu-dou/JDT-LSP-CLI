@@ -176,10 +176,10 @@ describe('symbolService - 签名匹配', () => {
       expect(matchSignature('String, int', 'String, String')).toBe(false);
     });
 
-    it('应该支持前缀匹配（参数数量不同时查询为符号前缀）', () => {
-      // 设计行为：允许前缀匹配，用于支持渐进式搜索
-      // 'String' 是 'String, int' 的规范化前缀
-      expect(matchSignature('String, int', 'String')).toBe(true);
+    it('应该拒绝参数数量不同的前缀匹配（不同参数数量视为不同重载）', () => {
+      // 设计行为：仅同参数数量时允许前缀匹配（泛型简化场景）
+      // 'String' 不应匹配 'String, int'，因为参数数量不同
+      expect(matchSignature('String, int', 'String')).toBe(false);
     });
 
     it('应该拒绝非前缀的不匹配签名', () => {
@@ -347,7 +347,8 @@ describe('symbolService - SymbolService 类', () => {
     });
 
     it('应该用签名消除重载歧义', () => {
-      const result = service.resolveSymbol(testSymbols, { name: 'myMethod', signature: '(String)' });
+      // 使用完整签名 (String, int) 精确匹配第一个重载
+      const result = service.resolveSymbol(testSymbols, { name: 'myMethod', signature: '(String, int)' });
       expect(result.success).toBe(true);
     });
 

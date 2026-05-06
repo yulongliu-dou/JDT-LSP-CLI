@@ -13,7 +13,7 @@ import { resolvePosition } from '../services/positionResolver';
 import { diagnoseProjectMismatch } from '../services/diagnostics';
 import { CLIResult, InitStage, ProjectLoadState } from '../../core/types';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
-import { rewriteCallItem } from '../../libraryProvider/uriRewriter';
+import { rewriteCallItem, rewriteLocation, rewriteLocations } from '../../libraryProvider/uriRewriter';
 // SP05：daemon 级 cache / library / config 端点
 import { cleanStale, cleanAll } from '../../libraryProvider/cache/cacheCleaner';
 import { save as saveDaemonConfig, load as loadDaemonConfig } from '../../libraryProvider/daemonConfigStore';
@@ -116,6 +116,9 @@ export async function setupRequestRouter(req: http.IncomingMessage, res: http.Se
       });
       return;
     }
+
+    // 确保 Locator 已注册（首次 initClient 成功后即可设置）
+    setLibraryLocator(daemonState.getLibraryLocator());
     
     // 路由到具体操作
     let result: any;
@@ -331,6 +334,15 @@ async function handleDefinition(body: any, activeClient: any, startTime: number,
     return 'handled';
   }
   const result = await activeClient.getDefinition(body.file, posResult.line, posResult.col);
+  // SP06: 对 jdt:// URI 执行重写
+  if (result) {
+    if (result.uri && result.range) {
+      // 单个 Location
+      return await rewriteLocation(result);
+    } else if (Array.isArray(result)) {
+      return await rewriteLocations(result);
+    }
+  }
   return result;
 }
 
@@ -349,7 +361,9 @@ async function handleReferences(body: any, activeClient: any, startTime: number,
   }
   const includeDecl = body.includeDeclaration !== false;
   const refs = await activeClient.getReferences(body.file, posResult.line, posResult.col, includeDecl);
-  return { references: refs, count: refs.length };
+  // SP06: 对 jdt:// URI 执行重写
+  const rewritten = await rewriteLocations(refs);
+  return { references: rewritten, count: rewritten.length };
 }
 
 /**
@@ -404,7 +418,9 @@ async function handleImplementations(body: any, activeClient: any, startTime: nu
     return 'handled';
   }
   const impls = await activeClient.getImplementations(body.file, posResult.line, posResult.col);
-  return { implementations: impls, count: impls.length };
+  // SP06: 对 jdt:// URI 执行重写
+  const rewritten = await rewriteLocations(impls);
+  return { implementations: rewritten, count: rewritten.length };
 }
 
 /**
@@ -593,8 +609,14 @@ async function handleTypeDefinition(body: any, activeClient: any, startTime: num
   try {
     const explainEmpty = body.explainEmpty || false;
     const typeDefResult = await activeClient.getTypeDefinition(body.file, posResult.line, posResult.col, explainEmpty);
-    // 确保返回统一格式
-    return typeDefResult || { locations: [], count: 0 };
+    if (!typeDefResult) return { locations: [], count: 0 };
+    // SP06: 对 jdt:// URI 执行重写
+    if (typeDefResult.locations && Array.isArray(typeDefResult.locations)) {
+      typeDefResult.locations = await rewriteLocations(typeDefResult.locations);
+    } else if (Array.isArray(typeDefResult)) {
+      return await rewriteLocations(typeDefResult);
+    }
+    return typeDefResult;
   } catch (error: any) {
     // 捕获错误并返回统一格式
     return { 

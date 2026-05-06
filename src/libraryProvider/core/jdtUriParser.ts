@@ -3,8 +3,10 @@
  *
  * 支持的格式：
  * - `jdt://contents/<container>/<pkg>/<Class>.class?=<hash>`
+ * - `jdt://contents/<container>/<pkg>/<Class>.java?=<hash>`（源码附件可用时）
  *   container 由 JDT 生成，内部可能含 URI 编码字符。
  * - `jdt://jarentry/<jar>!/<pkg>/<Class>.class`（防御性分支，少见）
+ * - `jdt://jarentry/<jar>!/<pkg>/<Class>.java`（防御性分支，少见）
  *
  * 输入非 jdt:// 或解析失败均返回 null，由调用方降级。
  *
@@ -50,12 +52,15 @@ function parseContentsUri(uri: string): ParsedJdtUri | null {
   const bodyWithPrefix = qIdx >= 0 ? uri.slice(0, qIdx) : uri;
   const body = bodyWithPrefix.slice(JDT_CONTENTS_PREFIX.length);
 
-  // 必须以 .class 结尾
-  if (!body.endsWith('.class')) {
+  // 必须以 .class 或 .java 结尾
+  let withoutExt: string;
+  if (body.endsWith('.class')) {
+    withoutExt = body.slice(0, -'.class'.length);
+  } else if (body.endsWith('.java')) {
+    withoutExt = body.slice(0, -'.java'.length);
+  } else {
     return null;
   }
-
-  const withoutExt = body.slice(0, -'.class'.length);
   const segments = withoutExt.split('/').filter(s => s.length > 0);
   if (segments.length < 2) {
     // 至少要有 <container> + <Class>
@@ -95,10 +100,15 @@ function parseJarEntryUri(uri: string): ParsedJdtUri | null {
   }
   const container = decodeURIComponentSafe(body.slice(0, bangIdx));
   const entryPath = body.slice(bangIdx + 2);
-  if (!entryPath.endsWith('.class')) {
+  let entryWithoutExt: string;
+  if (entryPath.endsWith('.class')) {
+    entryWithoutExt = entryPath.slice(0, -'.class'.length);
+  } else if (entryPath.endsWith('.java')) {
+    entryWithoutExt = entryPath.slice(0, -'.java'.length);
+  } else {
     return null;
   }
-  const fqcn = entryPath.slice(0, -'.class'.length).split('/').filter(Boolean).map(decodeURIComponentSafe).join('.');
+  const fqcn = entryWithoutExt.split('/').filter(Boolean).map(decodeURIComponentSafe).join('.');
   if (fqcn.length === 0) {
     return null;
   }

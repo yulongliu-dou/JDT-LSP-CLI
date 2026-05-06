@@ -17,7 +17,7 @@ export function isJdkContainer(container: string): boolean {
     return false;
   }
   const lower = container.toLowerCase();
-  if (lower.endsWith('jrt-fs.jar') || lower.endsWith('.jmod')) {
+  if (lower.endsWith('jrt-fs.jar') || lower.endsWith('.jmod') || lower === 'rt.jar' || lower.endsWith('/rt.jar') || lower.endsWith('\\rt.jar')) {
     return true;
   }
   if (lower.includes('/jre/lib/') || lower.includes('\\jre\\lib\\')) {

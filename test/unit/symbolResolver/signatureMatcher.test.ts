@@ -37,9 +37,10 @@ describe('signatureMatcher - 签名匹配', () => {
       expect(matchSignature('String, int', 'String, String')).toBe(false);
     });
 
-    it('应该支持前缀匹配（查询为符号签名的前缀）', () => {
-      // startsWith策略：'String' 是 'String,int' 的前缀
-      expect(matchSignature('String, int', 'String')).toBe(true);
+    it('应该拒绝参数数量不同的前缀匹配', () => {
+      // 设计行为：仅同参数数量时允许前缀匹配（泛型简化）
+      // 不同参数数量视为不同重载，不应匹配
+      expect(matchSignature('String, int', 'String')).toBe(false);
     });
 
     it('应该拒绝非前缀的不匹配签名', () => {
