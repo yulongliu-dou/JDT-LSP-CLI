@@ -91,13 +91,18 @@ jls def MyClass.java --method process --index 0
 jls def --global --symbol ArrayList --kind Class
 ```
 
-### 📦 缓存与源码定位
+### 📦 缓存与源码定位（含 Jar 内类定位）
 
-自动解析 JDT LS 返回的 jdt:// URI 为真实可读的 file:// 缓存文件，三级管道按优先级：
+自动解析 JDT LS 返回的 `jdt://` URI 为真实可读的 `file://` 缓存文件，支持对 jar 内类源码的完整定位与浏览。此功能在 **daemon 模式** 下自动启用，通过四级解析管道获取源码：
 
-1. **JDK 快速通道**: 从 `src.zip` 抽取 JDK 标准库源码（`lineMapping: exact`）
-2. **Maven sources**: 从 Maven 仓库下载 `-sources.jar`（`lineMapping: exact`）
-3. **Vineflower 反编译**: 对无 sources 的依赖全量反编译（`lineMapping: best-effort`）
+| 优先级 | 源 | 行号精度 | 触发条件 |
+|--------|------|----------|----------|
+| 1. **JDK `src.zip`** | `exact` | `java.base` 等标准库（含 JDK 8 `rt.jar`） |
+| 2. **Maven `sources.jar`** | `exact` | 项目传递依赖（如 `ognl`、`mybatis`） |
+| 3. **Vineflower 反编译** | `best-effort` | 无 sources 的第三方 jar 类 |
+| 4. **classFileContents** | `n/a` | 反编译失败或 class 文件本身 |
+
+**工作原理**：当通过 `def`、`refs`、`impl` 或 `type` 命令查询 JDK / Maven 依赖中的类时，JDT LS 返回 `jdt://contents/...` 或 `jdt://jarentry/...` URI。daemon 路由处理器自动将其 **重写为本地文件路径**，使 AI Agent 可直接打开和索引源码。
 
 ```bash
 # 查看缓存统计
@@ -109,6 +114,24 @@ jls cache clean --stale
 # 预热项目依赖
 jls cache warm
 ```
+
+**快速验证**（确认管道正常工作）：
+```bash
+# 1. JDK 类 → 应命中 jdk-src（优先 src.zip 而非 rt.jar 枚举）
+jls find java.util.function.Function --kind Class
+
+# 2. 三方依赖 → 应命中 sources-jar 或 decompiled
+jls find ognl.Ognl --kind Class
+```
+
+**配置**（通过 daemon `/config` API 热更新）：
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `libraryResolveEnabled` | `true` | jar 类解析总开关 |
+| `sourceDownloadMode` | `mvn` | 下载策略：`mvn` / `http` / `none` |
+| `decompiler` | `vineflower` | 反编译引擎 |
+| `cacheTtlDays` | `7` | 缓存生存天数 |
 
 详见 [缓存与源码定位](docs/commands/library-缓存与源码定位.md)。
 
