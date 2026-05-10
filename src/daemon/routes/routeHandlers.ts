@@ -268,6 +268,7 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
       uptime: process.uptime(),
       pid: process.pid,
       version: PACKAGE_VERSION,
+      startTime: daemonState.getStartTime(),
       // SP05：warnings + library resolve 开关
       warnings: daemonState.warnings.slice(-10),
       libraryResolveEnabled: config.libraryResolveEnabled,

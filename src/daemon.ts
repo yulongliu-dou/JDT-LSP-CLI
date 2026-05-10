@@ -23,13 +23,21 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { loadConfig } from './jdtClient';
-import { daemonState, DEFAULT_PORT, PID_FILE, LOG_FILE } from './daemon/core/daemonStateManager';
+import { daemonState, DEFAULT_PORT, PID_FILE, LOG_FILE, probeDaemonHealth, DaemonStatus } from './daemon/core/daemonStateManager';
 import { createHttpServer } from './daemon/http/httpServer';
 import { ProjectPool } from './projectPool';
 // SP05：定时清理
 import { cleanStale } from './libraryProvider/cache/cacheCleaner';
 import { load as loadDaemonConfig } from './libraryProvider/daemonConfigStore';
 import { validateEnvironment, isPortAvailable, validatePort } from './core/utils/daemonValidation';
+
+/**
+ * 将日期格式化为统一的 ISO-like 字符串：YYYY-MM-DD HH:mm:ss
+ */
+function formatDateTime(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 
 /**
  * 启动守护进程
@@ -72,16 +80,39 @@ export async function startDaemon(port: number = DEFAULT_PORT, options?: { eager
     fs.mkdirSync(pidDir, { recursive: true });
   }
 
-  // 检查是否已有守护进程运行
-  if (fs.existsSync(PID_FILE)) {
-    const existingPid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim());
+  // 检查是否已有守护进程运行（强化版：防 PID 复用、防端口冲突）
+  const pidInfo = daemonState.readPidFile();
+  if (pidInfo) {
     try {
-      process.kill(existingPid, 0); // 检查进程是否存在
-      console.error(`Daemon already running with PID ${existingPid}`);
-      process.exit(1);
-    } catch {
-      // 进程不存在，清理旧 PID 文件
-      fs.unlinkSync(PID_FILE);
+      process.kill(pidInfo.pid, 0); // 检查进程是否存在
+      // 进程存活，进一步验证是否是真正的 daemon（防止 PID 复用）
+      const probe = await probeDaemonHealth(pidInfo.port || DEFAULT_PORT, pidInfo.pid);
+      if (probe.isDaemon) {
+        console.error(`❌ Daemon already running with PID ${pidInfo.pid} on port ${pidInfo.port || DEFAULT_PORT}`);
+        console.error(`💡 Version: ${probe.version || pidInfo.version || 'unknown'}`);
+        if (pidInfo.startTime) {
+          console.error(`   Started: ${formatDateTime(new Date(pidInfo.startTime))}`);
+        }
+        console.error(`   Use 'jls daemon status' to see details, or 'jls daemon stop' first.`);
+        process.exit(1);
+      } else {
+        // PID 存活但不是 daemon（PID 复用），或 health check 失败
+        console.warn(`⚠️  Stale PID file detected (PID ${pidInfo.pid} is alive but not a daemon). Cleaning up...`);
+        if (fs.existsSync(PID_FILE)) {
+          fs.unlinkSync(PID_FILE);
+        }
+      }
+    } catch (err: any) {
+      if (err.code === 'EPERM') {
+        // Windows 上进程存在但无权限
+        console.error(`❌ PID ${pidInfo.pid} is active but cannot be accessed (permission denied).`);
+        console.error(`💡 If this is not the daemon, remove ${PID_FILE} manually.`);
+        process.exit(1);
+      }
+      // ESRCH: 进程不存在，清理旧 PID 文件
+      if (fs.existsSync(PID_FILE)) {
+        fs.unlinkSync(PID_FILE);
+      }
     }
   }
 
@@ -104,7 +135,7 @@ export async function startDaemon(port: number = DEFAULT_PORT, options?: { eager
 /**
  * 获取守护进程状态
  */
-export function getDaemonStatus(): { running: boolean; pid?: number; port: number } {
+export function getDaemonStatus(): DaemonStatus {
   return daemonState.getDaemonStatus();
 }
 

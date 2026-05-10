@@ -22,6 +22,14 @@ import { sendDaemonRequest } from '../utils/daemonRequest';
 import { validateDaemonOptions } from '../../core/utils/daemonValidation';
 
 /**
+ * 将日期格式化为统一的 ISO-like 字符串：YYYY-MM-DD HH:mm:ss
+ */
+function formatDateTime(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/**
  * 注册 daemon 命令
  */
 export function registerDaemon(program: Command): void {
@@ -119,6 +127,12 @@ export function registerDaemon(program: Command): void {
       console.log('Daemon status: RUNNING');
       console.log(`PID: ${status.pid}`);
       console.log(`Port: ${status.port}`);
+      if (status.version) {
+        console.log(`Version: ${status.version}`);
+      }
+      if (status.startTime) {
+        console.log(`Started: ${formatDateTime(new Date(status.startTime))}`);
+      }
       
       try {
         const result = await sendDaemonRequest('/status', {});
@@ -127,8 +141,11 @@ export function registerDaemon(program: Command): void {
           console.log(`Project: ${projectPath}`);
           console.log(`Status: ${result.data.status}`);
           console.log(`Uptime: ${Math.floor(result.data.uptime)}s`);
-          if (result.data.version) {
+          if (result.data.version && !status.version) {
             console.log(`Version: ${result.data.version}`);
+          }
+          if (result.data.startTime && !status.startTime) {
+            console.log(`Started: ${formatDateTime(new Date(result.data.startTime))}`);
           }
         }
       } catch (e) {

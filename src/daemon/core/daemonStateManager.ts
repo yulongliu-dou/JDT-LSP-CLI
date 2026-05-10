@@ -10,6 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as http from 'http';
 import { InitProgress, InitStage, ProjectLoadState } from '../../core/types';
 import { ProjectLoadEvent } from '../../projectPool';
 import { PACKAGE_VERSION } from '../../core/constants';
@@ -40,6 +41,56 @@ export const PID_FILE = resolvePidFile();
 export const LOG_FILE = resolveLogFile();
 
 /**
+ * PID 文件内容结构
+ */
+export interface PidFileContent {
+  pid: number;
+  port: number;
+  startTime: number;
+  version: string;
+}
+
+/**
+ * 守护进程状态
+ */
+export interface DaemonStatus {
+  running: boolean;
+  pid?: number;
+  port: number;
+  startTime?: number;
+  version?: string;
+}
+
+/**
+ * 通过 health 端点探测指定端口是否由我们的 daemon 监听
+ */
+export function probeDaemonHealth(
+  port: number,
+  expectedPid?: number
+): Promise<{ isDaemon: boolean; actualPid?: number; version?: string }> {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/health`, { timeout: 2000 }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const actualPid = json.data?.pid as number | undefined;
+          const version = json.data?.version as string | undefined;
+          const isDaemon = expectedPid ? actualPid === expectedPid : !!version;
+          resolve({ isDaemon, actualPid, version });
+        } catch {
+          resolve({ isDaemon: false });
+        }
+      });
+    });
+    req.on('error', () => resolve({ isDaemon: false }));
+    req.on('timeout', () => { req.destroy(); resolve({ isDaemon: false }); });
+  });
+}
+
+/**
  * 守护进程状态管理器类
  */
 export class DaemonStateManager {
@@ -65,6 +116,7 @@ export class DaemonStateManager {
     elapsedMs: 0,
   };
   private initStartTime = 0;
+  private startTime: number = 0;
 
   /**
    * 更新初始化进度
@@ -159,26 +211,83 @@ export class DaemonStateManager {
   getInitProgress() { return this.initProgress; }
   getInitStartTime() { return this.initStartTime; }
   setInitStartTime(time: number) { this.initStartTime = time; }
+  getStartTime() { return this.startTime; }
+  setStartTime(time: number) { this.startTime = time; }
+
+  /**
+   * 读取 PID 文件（兼容旧格式纯数字）
+   */
+  readPidFile(): PidFileContent | null {
+    if (!fs.existsSync(PID_FILE)) {
+      return null;
+    }
+    const content = fs.readFileSync(PID_FILE, 'utf-8').trim();
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed && typeof parsed.pid === 'number' && typeof parsed.port === 'number') {
+        return parsed as PidFileContent;
+      }
+    } catch {
+      // 旧格式：纯数字
+      const pid = parseInt(content, 10);
+      if (!isNaN(pid)) {
+        return { pid, port: DEFAULT_PORT, startTime: 0, version: 'unknown' };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 写入 JSON 格式 PID 文件
+   */
+  writePidFile(port: number): void {
+    const content: PidFileContent = {
+      pid: process.pid,
+      port,
+      startTime: Date.now(),
+      version: PACKAGE_VERSION,
+    };
+    const pidDir = path.dirname(PID_FILE);
+    if (!fs.existsSync(pidDir)) {
+      fs.mkdirSync(pidDir, { recursive: true });
+    }
+    fs.writeFileSync(PID_FILE, JSON.stringify(content, null, 2));
+  }
 
   /**
    * 获取守护进程状态
    */
-  getDaemonStatus(): { running: boolean; pid?: number; port: number } {
-    const port = DEFAULT_PORT;
-    
-    if (!fs.existsSync(PID_FILE)) {
-      return { running: false, port };
+  getDaemonStatus(): DaemonStatus {
+    const pidInfo = this.readPidFile();
+    if (!pidInfo) {
+      return { running: false, port: DEFAULT_PORT };
     }
     
-    const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim());
-    
     try {
-      process.kill(pid, 0);
-      return { running: true, pid, port };
-    } catch {
-      // 进程不存在，清理 PID 文件
-      fs.unlinkSync(PID_FILE);
-      return { running: false, port };
+      process.kill(pidInfo.pid, 0);
+      return {
+        running: true,
+        pid: pidInfo.pid,
+        port: pidInfo.port || DEFAULT_PORT,
+        startTime: pidInfo.startTime,
+        version: pidInfo.version,
+      };
+    } catch (err: any) {
+      if (err.code === 'EPERM') {
+        // Windows 上进程存在但无权限访问，保守认为仍在运行
+        return {
+          running: true,
+          pid: pidInfo.pid,
+          port: pidInfo.port || DEFAULT_PORT,
+          startTime: pidInfo.startTime,
+          version: pidInfo.version,
+        };
+      }
+      // ESRCH: 进程不存在，清理残留 PID 文件
+      if (fs.existsSync(PID_FILE)) {
+        fs.unlinkSync(PID_FILE);
+      }
+      return { running: false, port: DEFAULT_PORT };
     }
   }
 
@@ -186,22 +295,45 @@ export class DaemonStateManager {
    * 停止守护进程
    */
   stopDaemon(): boolean {
-    if (!fs.existsSync(PID_FILE)) {
+    const pidInfo = this.readPidFile();
+    if (!pidInfo) {
       return false;
     }
     
-    const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim());
-    
     try {
-      process.kill(pid, 'SIGTERM');
-      // 等待进程退出
-      setTimeout(() => {
-        if (fs.existsSync(PID_FILE)) {
-          fs.unlinkSync(PID_FILE);
+      process.kill(pidInfo.pid, 'SIGTERM');
+      // 轮询等待进程退出，最多 5 秒
+      const start = Date.now();
+      const timer = setInterval(() => {
+        try {
+          process.kill(pidInfo.pid, 0);
+          // 还活着
+          if (Date.now() - start > 5000) {
+            clearInterval(timer);
+            // 超时，强制 kill
+            try {
+              process.kill(pidInfo.pid, 'SIGKILL');
+            } catch {
+              // ignore
+            }
+            if (fs.existsSync(PID_FILE)) {
+              fs.unlinkSync(PID_FILE);
+            }
+          }
+        } catch {
+          // 已退出
+          clearInterval(timer);
+          if (fs.existsSync(PID_FILE)) {
+            fs.unlinkSync(PID_FILE);
+          }
         }
-      }, 1000);
+      }, 200);
       return true;
-    } catch {
+    } catch (err: any) {
+      if (err.code === 'EPERM') {
+        // 有进程但无权限，不删 PID 文件
+        return false;
+      }
       if (fs.existsSync(PID_FILE)) {
         fs.unlinkSync(PID_FILE);
       }

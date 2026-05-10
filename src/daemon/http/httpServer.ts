@@ -26,8 +26,9 @@ export function createHttpServer(
     daemonState.log(`PID: ${process.pid}`);
     daemonState.log(`Log file: ${LOG_FILE}`);
     
-    // 写入 PID 文件
-    fs.writeFileSync(PID_FILE, process.pid.toString());
+    // 写入 PID 文件（JSON 格式，包含端口、启动时间、版本）
+    daemonState.writePidFile(port);
+    daemonState.setStartTime(Date.now());
     
     console.log(`JDT LSP Daemon started on port ${port}`);
     console.log(`PID file: ${PID_FILE}`);
