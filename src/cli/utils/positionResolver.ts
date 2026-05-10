@@ -10,6 +10,7 @@ import { SymbolInfo, CLIResult } from '../../core/types';
 import { resolveSymbol, buildSymbolQuery, isSymbolMode, SymbolResolveResult, matchSignature as matchSignatureUnified } from '../../symbolResolver';
 import { sendDaemonRequest } from './daemonRequest';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
+import { looksLikeJdkSymbol, buildJdkHint } from '../../core/utils/jdkSymbolHint';
 
 /**
  * 解析文件路径（确保是绝对路径）
@@ -223,9 +224,13 @@ export async function resolveGlobalPosition(
   }
   
   if (filtered.length === 0) {
+    let errorMsg = `No ${kindFilter} named '${methodName}' found in workspace`;
+    if (looksLikeJdkSymbol(methodName, kindFilter)) {
+      errorMsg += '\n' + buildJdkHint(methodName, kindFilter);
+    }
     return {
       success: false,
-      error: `No ${kindFilter} named '${methodName}' found in workspace`,
+      error: errorMsg,
       data: {
         suggestions: symbols.slice(0, 10).map((s: any) => `${s.name} [${s.kind}] in ${s.containerName || 'unknown'}`)
       },

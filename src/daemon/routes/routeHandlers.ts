@@ -13,6 +13,7 @@ import { resolvePosition } from '../services/positionResolver';
 import { diagnoseProjectMismatch } from '../services/diagnostics';
 import { CLIResult, InitStage, ProjectLoadState } from '../../core/types';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
+import { looksLikeJdkSymbol, buildJdkHint } from '../../core/utils/jdkSymbolHint';
 import { rewriteCallItem, rewriteLocation, rewriteLocations } from '../../libraryProvider/uriRewriter';
 // SP05：daemon 级 cache / library / config 端点
 import { cleanStale, cleanAll } from '../../libraryProvider/cache/cacheCleaner';
@@ -589,8 +590,13 @@ async function handleWorkspaceSymbols(body: any, activeClient: any, startTime: n
     ...s,
     kind: symbolKindToString(s.kind)
   }));
-  
-  return { symbols: outputSymbols, count: outputSymbols.length };
+
+  const result: any = { symbols: outputSymbols, count: outputSymbols.length };
+  if (outputSymbols.length === 0 && looksLikeJdkSymbol(query, body.kind)) {
+    result.hint = buildJdkHint(query, body.kind);
+  }
+
+  return result;
 }
 
 /**

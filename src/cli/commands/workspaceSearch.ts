@@ -8,6 +8,7 @@ import { executeCommand, createDirectClient } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
+import { looksLikeJdkSymbol, buildJdkHint } from '../../core/utils/jdkSymbolHint';
 
 export function registerWorkspaceSymbolsCommand(program: Command) {
   program
@@ -49,7 +50,13 @@ export function registerWorkspaceSymbolsCommand(program: Command) {
               ...s,
               kind: symbolKindToString(s.kind)
             }));
-            
+
+            if (outputSymbols.length === 0 && looksLikeJdkSymbol(query, cmdOptions.kind)) {
+              throw new Error(
+                `No symbols found for '${query}'.\n` + buildJdkHint(query, cmdOptions.kind)
+              );
+            }
+
             return { symbols: outputSymbols, count: outputSymbols.length };
           } finally {
             if (client) await client.stop();
