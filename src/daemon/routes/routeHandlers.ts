@@ -12,6 +12,7 @@ import { initClient } from '../services/projectService';
 import { resolvePosition } from '../services/positionResolver';
 import { diagnoseProjectMismatch } from '../services/diagnostics';
 import { CLIResult, InitStage, ProjectLoadState } from '../../core/types';
+import { PACKAGE_VERSION } from '../../core/constants';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
 import { looksLikeJdkSymbol, buildJdkHint } from '../../core/utils/jdkSymbolHint';
 import { rewriteCallItem, rewriteLocation, rewriteLocations } from '../../libraryProvider/uriRewriter';
@@ -266,7 +267,7 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
       project: projectState,
       uptime: process.uptime(),
       pid: process.pid,
-      version: '1.0.0',
+      version: PACKAGE_VERSION,
       // SP05：warnings + library resolve 开关
       warnings: daemonState.warnings.slice(-10),
       libraryResolveEnabled: config.libraryResolveEnabled,
