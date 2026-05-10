@@ -710,6 +710,16 @@ async function handleLibraryResolve(body: any, res: http.ServerResponse, startTi
       return;
     }
 
+    // 确保 client 已就绪（library resolve 依赖 LSP 的 classFileContents）
+    if (!daemonState.isClientReady()) {
+      sendResponse(res, {
+        success: false,
+        error: 'JDT LS client not ready. Please initialize a project first (e.g., send a /definition or /workspace-symbols request).',
+        elapsed: Date.now() - startTime,
+      });
+      return;
+    }
+
     // 确保 uriRewriter 已注入 locator
     setLibraryLocator(daemonState.getLibraryLocator());
 

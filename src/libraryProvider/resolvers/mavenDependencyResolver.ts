@@ -95,9 +95,47 @@ export function resolveLocalRepo(): string {
 }
 
 /**
+ * 从 pom.xml 提取 `<properties>` 键值对（支持简单层级，不引入 XML 解析器）。
+ */
+function extractProperties(raw: string): Record<string, string> {
+  const props: Record<string, string> = {};
+
+  // 内置属性：project.*（先移除 <parent> 块，避免误匹配 parent 的 version/groupId）
+  const withoutParent = raw.replace(/<parent>[\s\S]*?<\/parent>/i, '');
+  const projectVersion = withoutParent.match(/<version>([^<]+)<\/version>/i);
+  const projectGroupId = withoutParent.match(/<groupId>([^<]+)<\/groupId>/i);
+  const projectArtifactId = withoutParent.match(/<artifactId>([^<]+)<\/artifactId>/i);
+  if (projectVersion) props['project.version'] = projectVersion[1].trim();
+  if (projectGroupId) props['project.groupId'] = projectGroupId[1].trim();
+  if (projectArtifactId) props['project.artifactId'] = projectArtifactId[1].trim();
+
+  // 提取 <properties>...</properties> 中的自定义属性
+  const propsMatch = raw.match(/<properties>\s*([\s\S]*?)\s*<\/properties>/i);
+  if (propsMatch) {
+    const propRegex = /<(\w[\w\-\.]*)>\s*([^<]+?)\s*<\/\1>/gi;
+    let pm: RegExpExecArray | null;
+    while ((pm = propRegex.exec(propsMatch[1])) !== null) {
+      props[pm[1]] = pm[2].trim();
+    }
+  }
+
+  return props;
+}
+
+/**
+ * 解析 `${...}` 占位符（单层替换，不递归）。
+ */
+function resolvePlaceholders(value: string, props: Record<string, string>): string {
+  return value.replace(/\$\{([^}]+)\}/g, (match, key) => {
+    return props[key] !== undefined ? props[key] : match;
+  });
+}
+
+/**
  * 解析 pom.xml 的直接 `<dependencies>`（非 test、provided）。
  *
  * 简单 regex 实现，不引入 XML 解析器依赖，足以覆盖标准 pom.xml。
+ * 支持解析 `<properties>` 中的 `${...}` 占位符。
  */
 export async function listDirectDeps(workspaceRoot: string): Promise<GAV[]> {
   const pomPath = path.join(workspaceRoot, 'pom.xml');
@@ -109,6 +147,9 @@ export async function listDirectDeps(workspaceRoot: string): Promise<GAV[]> {
   } catch {
     return [];
   }
+
+  // 提取 properties（用于解析 ${...} 占位符）
+  const properties = extractProperties(raw);
 
   // 提取 <dependencies>...</dependencies> 块（取第一个，忽略 <dependencyManagement>）
   // 简单策略：从第一个 <dependencies> 到第一个 </dependencies>
@@ -141,10 +182,15 @@ export async function listDirectDeps(workspaceRoot: string): Promise<GAV[]> {
 
     if (!gM || !aM) continue;
 
-    const groupId = gM[1].trim();
-    const artifactId = aM[1].trim();
+    let groupId = gM[1].trim();
+    let artifactId = aM[1].trim();
     // version 允许缺失（由父 POM 管理），此时用空字符串占位
-    const version = vM ? vM[1].trim() : '';
+    let version = vM ? vM[1].trim() : '';
+
+    // 解析 ${...} 占位符
+    groupId = resolvePlaceholders(groupId, properties);
+    artifactId = resolvePlaceholders(artifactId, properties);
+    version = resolvePlaceholders(version, properties);
 
     result.push({ groupId, artifactId, version });
   }

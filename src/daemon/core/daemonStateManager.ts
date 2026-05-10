@@ -142,6 +142,8 @@ export class DaemonStateManager {
         fetcher: {
           getClassFileContents: (uri: string) => this.client.getClassFileContents(uri),
         },
+        workspaceRoot: this.currentProject || undefined,
+        javaHome: process.env.JAVA_HOME,
         config,
         onWarning: (msg) => {
           // 限制警告总数，防止内存泄漏

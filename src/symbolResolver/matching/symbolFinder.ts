@@ -7,6 +7,7 @@
 import { SymbolQuery, SymbolInfo } from '../../core/types';
 import { fuzzyMatchName } from './signatureMatcher';
 import { matchSignature } from './signatureMatcher';
+import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
 
 /**
  * 构建符号的完整路径
@@ -95,8 +96,12 @@ export function findMatchingSymbols(
     // 名称匹配（支持模糊匹配）
     if (!fuzzyMatchName(symbol.name, query.name)) return false;
     
-    // 类型匹配（如果指定）
-    if (query.kind && symbol.kind !== query.kind) return false;
+    // 类型匹配（如果指定）—— 支持数字 kind 与字符串 kind 互相比对
+    if (query.kind) {
+      const symbolKindStr = typeof symbol.kind === 'number' ? symbolKindToString(symbol.kind) : String(symbol.kind);
+      const queryKindStr = typeof query.kind === 'number' ? symbolKindToString(query.kind) : String(query.kind);
+      if (symbolKindStr !== queryKindStr) return false;
+    }
     
     // 签名匹配（如果指定）- 已支持模糊匹配
     if (query.signature && !matchSignature(symbol.detail, query.signature, symbol.name)) {

@@ -7,6 +7,7 @@ import * as path from 'path';
 import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
+import { resolveSymbol, buildSymbolQuery } from '../../symbolResolver';
 
 export function registerDefinitionCommand(program: Command) {
   let definitionCmd = program
@@ -49,13 +50,38 @@ export function registerDefinitionCommand(program: Command) {
         file: filePath,
         line: resolvedLine,
         col: resolvedCol,
+        symbol: cmdOptions.symbol,
+        kind: cmdOptions.kind,
+        index: cmdOptions.index,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
       async () => {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          return await client.getDefinition(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
+          let finalLine = parseInt(resolvedLine);
+          let finalCol = parseInt(resolvedCol);
+          // 对 global 模式下解析到的外部文件，用文档符号重新精确定位
+          if (cmdOptions.global && cmdOptions.symbol && cmdOptions.kind) {
+            try {
+              const symbols = await client.getDocumentSymbols(filePath);
+              const symbolQuery = buildSymbolQuery({
+                symbol: cmdOptions.symbol,
+                kind: cmdOptions.kind,
+                index: cmdOptions.index,
+              });
+              if (symbolQuery) {
+                const result = resolveSymbol(symbols, symbolQuery, 'definition');
+                if (result.success) {
+                  finalLine = result.position.line;
+                  finalCol = result.position.character;
+                }
+              }
+            } catch {
+              // 文档符号定位失败，继续使用原位置
+            }
+          }
+          return await client.getDefinition(filePath, finalLine, finalCol);
         } finally {
           if (client) await client.stop();
         }

@@ -266,11 +266,91 @@ export async function resolveGlobalPosition(
   
   // 提取位置
   const uri = selected.location?.uri || '';
-  // SP02：jdt:// URI 无法被本工具直接操作，提示启用 library-resolve
+  // SP02/SP06：jdt:// URI 无法被本工具直接操作，先尝试通过 daemon 的 library-resolve 解析
   if (uri.startsWith('jdt:')) {
+    if (opts.daemon !== false) {
+      const resolveResult = await sendDaemonRequest('/library/resolve', {
+        jdtUri: uri,
+        range: selected.location?.range,
+      });
+      if (resolveResult.success) {
+        const resolved = resolveResult.data;
+        if (resolved && resolved.uri) {
+          try {
+            const resolvedFilePath = fileURLToPath(resolved.uri);
+            const resolvedLine = (resolved.range?.start?.line ?? 0) + 1;
+            const resolvedCol = (resolved.range?.start?.character ?? 0) + 1;
+            return {
+              filePath: resolvedFilePath,
+              line: String(resolvedLine),
+              col: String(resolvedCol),
+            };
+          } catch (err: any) {
+            return {
+              success: false,
+              error: `Library resolve returned invalid file URI (${resolved.uri}): ${err.message}`,
+              elapsed: 0,
+            };
+          }
+        } else {
+          return {
+            success: false,
+            error: `Library resolve returned empty result for ${uri}. The jar class could not be resolved (check daemon logs or ensure the dependency jar is accessible).`,
+            elapsed: 0,
+          };
+        }
+      } else {
+        return {
+          success: false,
+          error: `Library resolve failed: ${resolveResult.error || 'unknown error'}`,
+          elapsed: 0,
+        };
+      }
+    }
+
+    // 直接模式：尝试创建临时 client 解析 jdt:// URI
+    let client: JdtLsClient | null = null;
+    try {
+      client = await createDirectClient(opts);
+      const { LibraryClassLocator } = await import('../../libraryProvider/core/libraryClassLocator');
+      const { load: loadDaemonConfig } = await import('../../libraryProvider/daemonConfigStore');
+      const config = loadDaemonConfig();
+      const locator = new LibraryClassLocator({
+        fetcher: {
+          getClassFileContents: (jdtUri: string) => client!.getClassFileContents(jdtUri),
+        },
+        workspaceRoot: projectPath,
+        javaHome: process.env.JAVA_HOME,
+        config,
+      });
+      const defaultRange = {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 0 },
+      };
+      const resolved = await locator.resolve(uri, selected.location?.range || defaultRange);
+      if (resolved) {
+        const resolvedFilePath = fileURLToPath(resolved.uri);
+        const resolvedLine = (resolved.range?.start?.line ?? 0) + 1;
+        const resolvedCol = (resolved.range?.start?.character ?? 0) + 1;
+        return {
+          filePath: resolvedFilePath,
+          line: String(resolvedLine),
+          col: String(resolvedCol),
+        };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        error: `Direct mode library resolve failed for ${uri}: ${err.message}`,
+        elapsed: 0,
+      };
+    } finally {
+      if (client) await client.stop();
+    }
+
     return {
       success: false,
-      error: 'positionResolver received jdt:// uri; enable library-resolve (set libraryResolveEnabled=true in ~/.lsp-cache/daemon-config.json) to support jar classes',
+      error: 'Cannot resolve jdt:// URI. Start daemon with: jls daemon start, or ensure the jar class is accessible.',
       elapsed: 0,
     };
   }
