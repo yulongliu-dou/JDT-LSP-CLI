@@ -19,6 +19,7 @@ import {
 } from '../../daemon';
 import { InitProgress } from '../../core/types';
 import { sendDaemonRequest } from '../utils/daemonRequest';
+import { validateDaemonOptions } from '../../core/utils/daemonValidation';
 
 /**
  * 注册 daemon 命令
@@ -38,26 +39,47 @@ export function registerDaemon(program: Command): void {
     .option('--wait', 'Wait for initialization to complete')
     .action(async (cmdOpts) => {
       const opts = program.opts();
+
+      // 第1层：CLI 前置校验（格式、范围、组合关系）
+      const validation = validateDaemonOptions(cmdOpts, opts);
+      if (!validation.valid) {
+        console.error(`❌ 参数错误: ${validation.error}`);
+        if (validation.suggestion) {
+          console.error(`💡 ${validation.suggestion}`);
+        }
+        process.exit(1);
+      }
+      if (validation.warnings) {
+        for (const w of validation.warnings) {
+          console.warn(`⚠️  ${w}`);
+        }
+      }
+
       const status = getDaemonStatus();
-      
+
       if (status.running) {
         console.log(`Daemon already running with PID ${status.pid}`);
         process.exit(0);
       }
-      
+
       console.log('Starting JDT LSP daemon...');
-      
+
       const eagerOptions = cmdOpts.eager ? {
         eagerInit: true,
         projectPath: cmdOpts.initProject || opts.project,
         jdtlsPath: opts.jdtlsPath,
       } : undefined;
-      
+
+      const port = parseInt(cmdOpts.port, 10);
+
       if (cmdOpts.eager && cmdOpts.wait && eagerOptions?.projectPath) {
-        await startDaemonWithFork(parseInt(cmdOpts.port), eagerOptions);
+        await startDaemonWithFork(port, eagerOptions);
         process.exit(0);
       } else {
-        startDaemon(parseInt(cmdOpts.port), eagerOptions);
+        startDaemon(port, eagerOptions).catch((err: any) => {
+          console.error('❌ 守护进程启动失败:', err.message || err);
+          process.exit(1);
+        });
       }
     });
 

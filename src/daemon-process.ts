@@ -7,9 +7,20 @@
  */
 
 import { startDaemon } from './daemon';
+import { validatePort } from './core/utils/daemonValidation';
 
 // 从环境变量获取配置
-const port = parseInt(process.env.JLS_DAEMON_PORT || '9876');
+const portStr = process.env.JLS_DAEMON_PORT || '9876';
+const portCheck = validatePort(portStr);
+if (!portCheck.valid) {
+  console.error(`❌ 守护进程启动失败: ${portCheck.error}`);
+  if (portCheck.suggestion) {
+    console.error(`💡 ${portCheck.suggestion}`);
+  }
+  process.exit(1);
+}
+const port = parseInt(portStr, 10);
+
 const eagerInit = process.env.JLS_DAEMON_EAGER === 'true';
 const projectPath = process.env.JLS_DAEMON_PROJECT || undefined;
 const jdtlsPath = process.env.JLS_DAEMON_JDTLS || undefined;
@@ -19,4 +30,7 @@ startDaemon(port, {
   eagerInit,
   projectPath,
   jdtlsPath,
+}).catch((err) => {
+  console.error('❌ 守护进程启动异常:', err.message || err);
+  process.exit(1);
 });

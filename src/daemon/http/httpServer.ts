@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import { daemonState, DEFAULT_PORT, PID_FILE, LOG_FILE } from '../core/daemonStateManager';
 import { setCorsHeaders } from './requestHandlers';
 import { setupRequestRouter } from '../routes/routeHandlers';
+import { validateProjectPath } from '../../core/utils/daemonValidation';
 
 /**
  * 创建并启动 HTTP 服务器
@@ -34,7 +35,29 @@ export function createHttpServer(
     
     // 预初始化项目（如果启用）
     if (options?.eagerInit && options?.projectPath) {
-      await handleEagerInitialization(options, port);
+      const projectCheck = validateProjectPath(options.projectPath);
+      if (!projectCheck.valid) {
+        console.error(`⚠️  Eager init skipped: ${projectCheck.error}`);
+        if (projectCheck.suggestion) {
+          console.error(`💡 ${projectCheck.suggestion}`);
+        }
+        if (process.send) {
+          process.send({
+            type: 'error',
+            data: {
+              error: projectCheck.error,
+              projectPath: options.projectPath,
+            },
+          });
+        }
+      } else {
+        if (projectCheck.warnings) {
+          for (const w of projectCheck.warnings) {
+            console.warn(`⚠️  ${w}`);
+          }
+        }
+        await handleEagerInitialization(options, port);
+      }
     }
   });
   
@@ -74,7 +97,11 @@ async function handleEagerInitialization(
   daemonState.log('Eager initialization enabled, pre-warming project:', options.projectPath);
   console.log('Pre-initializing project:', options.projectPath);
   try {
-    await initClient(options.projectPath!, { jdtlsPath: options.jdtlsPath });
+    const projectPath = options.projectPath;
+    if (!projectPath) {
+      throw new Error('projectPath is required for eager initialization');
+    }
+    await initClient(projectPath, { jdtlsPath: options.jdtlsPath });
     daemonState.log('Project pre-initialized successfully');
     console.log('Project ready!');
     

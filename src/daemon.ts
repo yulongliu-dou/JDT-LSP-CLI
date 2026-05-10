@@ -29,20 +29,49 @@ import { ProjectPool } from './projectPool';
 // SP05：定时清理
 import { cleanStale } from './libraryProvider/cache/cacheCleaner';
 import { load as loadDaemonConfig } from './libraryProvider/daemonConfigStore';
+import { validateEnvironment, isPortAvailable, validatePort } from './core/utils/daemonValidation';
 
 /**
  * 启动守护进程
  */
-export function startDaemon(port: number = DEFAULT_PORT, options?: { eagerInit?: boolean; projectPath?: string; jdtlsPath?: string; multiProject?: boolean }): void {
+export async function startDaemon(port: number = DEFAULT_PORT, options?: { eagerInit?: boolean; projectPath?: string; jdtlsPath?: string; multiProject?: boolean }): Promise<void> {
+  // 第2层：环境预检（JAVA_HOME、目录权限、内存）
+  const envCheck = validateEnvironment(PID_FILE, LOG_FILE);
+  if (!envCheck.valid) {
+    console.error(`❌ 环境检查失败: ${envCheck.error}`);
+    if (envCheck.suggestion) {
+      console.error(`💡 ${envCheck.suggestion}`);
+    }
+    if (envCheck.warnings) {
+      for (const w of envCheck.warnings) {
+        console.warn(`⚠️  ${w}`);
+      }
+    }
+    process.exit(1);
+  }
+  if (envCheck.warnings) {
+    for (const w of envCheck.warnings) {
+      console.warn(`⚠️  ${w}`);
+    }
+  }
+
+  // 端口占用检测
+  const portAvailable = await isPortAvailable(port);
+  if (!portAvailable) {
+    console.error(`❌ 端口 ${port} 已被占用`);
+    console.error(`💡 请更换端口: jls daemon start --port <other-port>`);
+    process.exit(1);
+  }
+
   // 加载配置
   const config = loadConfig();
-  
+
   // 确保目录存在
   const pidDir = path.dirname(PID_FILE);
   if (!fs.existsSync(pidDir)) {
     fs.mkdirSync(pidDir, { recursive: true });
   }
-  
+
   // 检查是否已有守护进程运行
   if (fs.existsSync(PID_FILE)) {
     const existingPid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim());
@@ -55,7 +84,7 @@ export function startDaemon(port: number = DEFAULT_PORT, options?: { eagerInit?:
       fs.unlinkSync(PID_FILE);
     }
   }
-  
+
   // 初始化项目池（如果启用多项目模式）
   const maxProjects = config.daemon?.maxProjects || 1;
   if (maxProjects > 1 || options?.multiProject) {
@@ -64,7 +93,7 @@ export function startDaemon(port: number = DEFAULT_PORT, options?: { eagerInit?:
     const projectPool = new ProjectPool(config, daemonState.log.bind(daemonState));
     daemonState.setProjectPool(projectPool);
   }
-  
+
   // 创建并启动 HTTP 服务器
   createHttpServer(port, options);
 
@@ -123,9 +152,21 @@ function scheduleCacheCleanup(): void {
 
 // 如果直接运行此文件，启动守护进程
 if (require.main === module) {
-  const port = parseInt(process.env.JLS_DAEMON_PORT || String(DEFAULT_PORT));
+  const portStr = process.env.JLS_DAEMON_PORT || String(DEFAULT_PORT);
+  const portCheck = validatePort(portStr);
+  if (!portCheck.valid) {
+    console.error(`❌ 守护进程启动失败: ${portCheck.error}`);
+    if (portCheck.suggestion) {
+      console.error(`💡 ${portCheck.suggestion}`);
+    }
+    process.exit(1);
+  }
+  const port = parseInt(portStr, 10);
   const eagerInit = process.env.JLS_DAEMON_EAGER === 'true';
   const projectPath = process.env.JLS_DAEMON_PROJECT || undefined;
   const jdtlsPath = process.env.JLS_DAEMON_JDTLS || undefined;
-  startDaemon(port, { eagerInit, projectPath, jdtlsPath });
+  startDaemon(port, { eagerInit, projectPath, jdtlsPath }).catch((err) => {
+    console.error('❌ 守护进程启动异常:', err.message || err);
+    process.exit(1);
+  });
 }
