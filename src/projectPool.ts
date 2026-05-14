@@ -34,6 +34,8 @@ interface ProjectClient {
   status: 'initializing' | 'ready' | 'error';
   initPromise?: Promise<void>;
   loadEvent?: ProjectLoadEvent;  // 记录加载事件
+  draining: boolean;             // 标记为待释放
+  activeRequests: number;        // in-flight LSP 请求计数
 }
 
 /**
@@ -43,10 +45,16 @@ export class ProjectPool {
   private clients: Map<string, ProjectClient> = new Map();
   private config: DaemonConfig;
   private log: (message: string, ...args: any[]) => void;
+  private onIndexProgress?: (projectPath: string, params: any) => void;
 
-  constructor(config: DaemonConfig, logger?: (message: string, ...args: any[]) => void) {
+  constructor(
+    config: DaemonConfig,
+    logger?: (message: string, ...args: any[]) => void,
+    onIndexProgress?: (projectPath: string, params: any) => void,
+  ) {
     this.config = config;
     this.log = logger || console.log;
+    this.onIndexProgress = onIndexProgress;
   }
 
   /**
@@ -59,13 +67,17 @@ export class ProjectPool {
     // 检查现有客户端
     const existing = this.clients.get(normalizedPath);
     if (existing) {
+      if (existing.draining) {
+        throw new Error('Project is being evicted, please retry');
+      }
+
       existing.lastAccess = Date.now();
-      
+
       // 等待初始化完成
       if (existing.status === 'initializing' && existing.initPromise) {
         await existing.initPromise;
       }
-      
+
       if (existing.status === 'ready') {
         this.log('Reusing existing client for project:', normalizedPath);
         existing.loadEvent = { type: 'reused', projectPath: normalizedPath };
@@ -128,6 +140,13 @@ export class ProjectPool {
       evictedProject,
     };
     
+    // 索引进度追踪（FP6）
+    if (this.onIndexProgress) {
+      client.setProgressNotificationHandler((params: any) => {
+        this.onIndexProgress!(projectPath, params);
+      });
+    }
+
     const projectClient: ProjectClient = {
       client,
       projectPath,
@@ -135,10 +154,12 @@ export class ProjectPool {
       priority,
       status: 'initializing',
       loadEvent,
+      draining: false,
+      activeRequests: 0,
     };
-    
+
     const startTime = Date.now();
-    
+
     // 设置初始化 Promise
     projectClient.initPromise = (async () => {
       try {
@@ -223,6 +244,25 @@ export class ProjectPool {
   }
 
   /**
+   * 获取项目 JDT LS 子进程 PID
+   */
+  getProjectPid(projectPath: string): number | null {
+    const normalizedPath = path.resolve(projectPath);
+    const pc = this.clients.get(normalizedPath);
+    if (!pc) return null;
+    return pc.client.getChildPid();
+  }
+
+  /**
+   * 获取项目加载耗时（毫秒）
+   */
+  getProjectLoadTime(projectPath: string): number | undefined {
+    const normalizedPath = path.resolve(projectPath);
+    const pc = this.clients.get(normalizedPath);
+    return pc?.loadEvent?.loadTime;
+  }
+
+  /**
    * 获取所有活跃项目
    */
   listProjects(): Array<{
@@ -262,6 +302,62 @@ export class ProjectPool {
    */
   hasProject(projectPath: string): boolean {
     return this.clients.has(path.resolve(projectPath));
+  }
+
+  /**
+   * 标记项目为待释放（draining）
+   */
+  markDraining(projectPath: string): boolean {
+    const normalizedPath = path.resolve(projectPath);
+    const pc = this.clients.get(normalizedPath);
+    if (!pc) return false;
+    pc.draining = true;
+    return true;
+  }
+
+  /**
+   * 取消 draining 标记
+   */
+  unmarkDraining(projectPath: string): void {
+    const normalizedPath = path.resolve(projectPath);
+    const pc = this.clients.get(normalizedPath);
+    if (pc) pc.draining = false;
+  }
+
+  /**
+   * 增加活跃请求计数
+   */
+  incrementRequests(projectPath: string): void {
+    const normalizedPath = path.resolve(projectPath);
+    const pc = this.clients.get(normalizedPath);
+    if (pc) pc.activeRequests++;
+  }
+
+  /**
+   * 减少活跃请求计数
+   */
+  decrementRequests(projectPath: string): void {
+    const normalizedPath = path.resolve(projectPath);
+    const pc = this.clients.get(normalizedPath);
+    if (pc && pc.activeRequests > 0) pc.activeRequests--;
+  }
+
+  /**
+   * 获取活跃请求数
+   */
+  getActiveRequestCount(projectPath: string): number {
+    const normalizedPath = path.resolve(projectPath);
+    const pc = this.clients.get(normalizedPath);
+    return pc ? pc.activeRequests : 0;
+  }
+
+  /**
+   * 检查项目是否处于 draining 状态
+   */
+  isDraining(projectPath: string): boolean {
+    const normalizedPath = path.resolve(projectPath);
+    const pc = this.clients.get(normalizedPath);
+    return pc ? pc.draining : false;
   }
 
   /**

@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as http from 'http';
-import { InitProgress, InitStage, ProjectLoadState } from '../../core/types';
+import { InitProgress, InitStage, ProjectLoadState, IndexProgress } from '../../core/types';
 import { ProjectLoadEvent } from '../../projectPool';
 import { PACKAGE_VERSION } from '../../core/constants';
 import { LibraryClassLocator } from '../../libraryProvider/core/libraryClassLocator';
@@ -206,6 +206,76 @@ export class DaemonStateManager {
       });
     }
     return this.libraryLocator;
+  }
+
+  // 索引进度追踪
+  // FP5：MemoryMonitor + AutoScaler 引用（FP7 /status 端点使用）
+  private memoryMonitor: any = null;
+  private autoScaler: any = null;
+
+  getMemoryMonitor() { return this.memoryMonitor; }
+  setMemoryMonitor(m: any) { this.memoryMonitor = m; }
+  getAutoScaler() { return this.autoScaler; }
+  setAutoScaler(a: any) { this.autoScaler = a; }
+
+  private indexProgressMap = new Map<string, IndexProgress>();
+
+  updateIndexProgress(projectPath: string, params: { token: string; value: { kind: string; title?: string; percentage?: number; message?: string } }): void {
+    const { token, value } = params;
+    const tokenLower = (token || '').toLowerCase();
+    const isRelevant = /build|index|import|workspace/i.test(tokenLower);
+    if (!isRelevant) return;
+
+    const existing = this.indexProgressMap.get(projectPath);
+    const now = Date.now();
+
+    if (value.kind === 'begin') {
+      this.indexProgressMap.set(projectPath, {
+        stage: 'in_progress',
+        title: value.title,
+        percent: value.percentage ?? 0,
+        message: value.message,
+        lastUpdated: now,
+      });
+    } else if (value.kind === 'report') {
+      this.indexProgressMap.set(projectPath, {
+        stage: 'in_progress',
+        title: value.title ?? existing?.title,
+        percent: value.percentage ?? existing?.percent ?? 0,
+        message: value.message ?? existing?.message,
+        lastUpdated: now,
+      });
+    } else if (value.kind === 'end') {
+      this.indexProgressMap.set(projectPath, {
+        stage: 'completed',
+        title: value.title ?? existing?.title,
+        percent: 100,
+        message: value.message ?? existing?.message,
+        lastUpdated: now,
+      });
+    }
+  }
+
+  getIndexProgress(projectPath: string): IndexProgress | undefined {
+    return this.indexProgressMap.get(projectPath);
+  }
+
+  /**
+   * 检测索引 stalled：in_progress + 10 分钟无更新 → stalled
+   */
+  checkStalled(): void {
+    const now = Date.now();
+    const staleThreshold = 10 * 60 * 1000;
+    for (const [projectPath, progress] of this.indexProgressMap) {
+      if (progress.stage === 'in_progress' && now - progress.lastUpdated > staleThreshold) {
+        this.indexProgressMap.set(projectPath, {
+          ...progress,
+          stage: 'stalled',
+          lastUpdated: now,
+        });
+        this.log(`Index progress stalled for project: ${projectPath}`);
+      }
+    }
   }
 
   getInitProgress() { return this.initProgress; }

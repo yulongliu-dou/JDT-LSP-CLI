@@ -26,6 +26,8 @@ import { loadConfig } from './jdtClient';
 import { daemonState, DEFAULT_PORT, PID_FILE, LOG_FILE, probeDaemonHealth, DaemonStatus } from './daemon/core/daemonStateManager';
 import { createHttpServer } from './daemon/http/httpServer';
 import { ProjectPool } from './projectPool';
+import { MemoryMonitor } from './daemon/core/memoryMonitor';
+import { AutoScaler } from './daemon/services/autoScaler';
 // SP05：定时清理
 import { cleanStale } from './libraryProvider/cache/cacheCleaner';
 import { load as loadDaemonConfig } from './libraryProvider/daemonConfigStore';
@@ -121,8 +123,29 @@ export async function startDaemon(port: number = DEFAULT_PORT, options?: { eager
   if (maxProjects > 1 || options?.multiProject) {
     daemonState.log('Multi-project mode enabled, max projects:', maxProjects);
     console.log(`Multi-project mode enabled (max ${maxProjects} projects)`);
-    const projectPool = new ProjectPool(config, daemonState.log.bind(daemonState));
+    const projectPool = new ProjectPool(config, daemonState.log.bind(daemonState), (projectPath, params) => {
+      daemonState.updateIndexProgress(projectPath, params);
+    });
     daemonState.setProjectPool(projectPool);
+
+    // FP5：初始化 MemoryMonitor + AutoScaler（仅多项目模式）
+    const asConfig = config.daemon?.autoScaling;
+    if (asConfig?.enabled !== false) {
+      const memoryMonitor = new MemoryMonitor(
+        asConfig?.maxSnapshotAgeMs ?? 60000,
+        asConfig?.collectionTimeoutMs ?? 10000,
+      );
+      memoryMonitor.start((asConfig?.checkIntervalSeconds ?? 15) * 1000);
+      daemonState.log('MemoryMonitor started');
+
+      const autoScaler = new AutoScaler(memoryMonitor, projectPool, config, daemonState.log.bind(daemonState));
+      autoScaler.start((asConfig?.checkIntervalSeconds ?? 15) * 1000);
+      daemonState.log('AutoScaler started');
+
+      // 存储引用供 /status 端点使用（FP7）
+      daemonState.setMemoryMonitor(memoryMonitor);
+      daemonState.setAutoScaler(autoScaler);
+    }
   }
 
   // 创建并启动 HTTP 服务器

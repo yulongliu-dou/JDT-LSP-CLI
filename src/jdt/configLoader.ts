@@ -41,6 +41,17 @@ export const DEFAULT_DAEMON_CONFIG: DaemonConfigOptions = {
   idleTimeoutMinutes: 30,
   maxProjects: 1,           // 默认单项目模式
   perProjectMemory: '1g',   // 每项目 1GB
+  autoScaling: {
+    enabled: true,
+    minProjects: 1,
+    maxProjects: 3,
+    scaleCooldownSeconds: 30,
+    checkIntervalSeconds: 15,
+    idleEvictMinutes: 30,
+    maxSnapshotAgeMs: 60000,
+    drainTimeoutMs: 5000,
+    collectionTimeoutMs: 10000,
+  },
 };
 
 /**

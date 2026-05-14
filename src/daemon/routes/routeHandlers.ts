@@ -21,6 +21,7 @@ import { cleanStale, cleanAll } from '../../libraryProvider/cache/cacheCleaner';
 import { save as saveDaemonConfig, load as loadDaemonConfig } from '../../libraryProvider/daemonConfigStore';
 import { collectStats } from '../../libraryProvider/cache/cacheStats';
 import { setLibraryLocator } from '../../libraryProvider/uriRewriter';
+import { loadConfig as loadCoreConfig } from '../../jdt/configLoader';
 
 /**
  * 设置请求路由器
@@ -121,61 +122,71 @@ export async function setupRequestRouter(req: http.IncomingMessage, res: http.Se
 
     // 确保 Locator 已注册（首次 initClient 成功后即可设置）
     setLibraryLocator(daemonState.getLibraryLocator());
-    
+
+    // FP5：多项目模式下追踪活跃请求（供 AutoScaler drain 使用）
+    const projectPool = daemonState.getProjectPool();
+    if (projectPool) {
+      projectPool.incrementRequests(project);
+      // Notify AutoScaler that pool is active (resets idle timeout)
+      const autoScaler = daemonState.getAutoScaler();
+      if (autoScaler) autoScaler.notifyProjectActivity();
+    }
+
+    try {
     // 路由到具体操作
     let result: any;
-    
+
     switch (pathname) {
       case '/definition':
         result = await handleDefinition(body, activeClient, startTime, res);
         if (result === 'handled') return;
         break;
-        
+
       case '/references':
         result = await handleReferences(body, activeClient, startTime, res);
         if (result === 'handled') return;
         break;
-        
+
       case '/symbols':
         result = await handleSymbols(body, activeClient, startTime);
         break;
-        
+
       case '/implementations':
         result = await handleImplementations(body, activeClient, startTime, res);
         if (result === 'handled') return;
         break;
-        
+
       case '/hover':
         result = await handleHover(body, activeClient, startTime, res);
         if (result === 'handled') return;
         break;
-        
+
       case '/call-hierarchy':
         result = await handleCallHierarchy(body, activeClient, startTime, res);
         if (result === 'handled') return;
         break;
-      
+
       case '/call-hierarchy/lazy':
       case '/call-hierarchy/snapshot':
       case '/call-hierarchy/summary':
         result = await handleEnhancedCallHierarchy(body, activeClient, project, startTime);
         break;
-      
+
       case '/workspace-symbols':
       case '/find':
         result = await handleWorkspaceSymbols(body, activeClient, startTime);
         break;
-      
+
       case '/type-definition':
       case '/typedef':
         result = await handleTypeDefinition(body, activeClient, startTime, res);
         if (result === 'handled') return;
         break;
-      
+
       case '/release':
         result = await handleRelease(body, project, startTime);
         break;
-        
+
       default:
         sendResponse(res, {
           success: false,
@@ -184,26 +195,38 @@ export async function setupRequestRouter(req: http.IncomingMessage, res: http.Se
         });
         return;
     }
-    
+
     // 构建响应，包含项目加载状态元数据
     const response: CLIResult<any> = {
       success: true,
       data: result,
       elapsed: Date.now() - startTime,
     };
-    
-    // 添加项目加载状态元数据（如果有）
+
+    // 索引完成状态
+    const indexProgress = daemonState.getIndexProgress(project);
+    const indexingComplete = indexProgress
+      ? indexProgress.percent === 100 || indexProgress.stage === 'completed'
+      : false;
+
+    // 元数据
+    const metadata: any = { indexingComplete };
     if (loadEvent && (loadEvent.type === 'new' || loadEvent.type === 'reloaded')) {
-      response.metadata = {
-        projectStatus: {
-          reloaded: loadEvent.type === 'reloaded',
-          loadTime: loadEvent.loadTime,
-          evictedProject: loadEvent.evictedProject,
-        }
-      } as any;
+      metadata.projectStatus = {
+        reloaded: loadEvent.type === 'reloaded',
+        loadTime: loadEvent.loadTime,
+        evictedProject: loadEvent.evictedProject,
+      };
     }
-    
+    response.metadata = metadata;
+
     sendResponse(res, response);
+
+    } finally {
+      if (projectPool) {
+        projectPool.decrementRequests(project);
+      }
+    }
     
   } catch (error: any) {
     daemonState.log('Request error:', error.message);
@@ -218,23 +241,42 @@ export async function setupRequestRouter(req: http.IncomingMessage, res: http.Se
 // ========== 各个端点处理函数 ==========
 
 /**
- * 健康检查
+ * 健康检查 / 完整状态（FP7：含 memory + autoScaling + projects[] + processMemory）
  */
 async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
   const currentProject = daemonState.getCurrentProject();
   const isReady = daemonState.isClientReady();
   const initProgress = daemonState.getInitProgress();
   const lastLoadEvent = daemonState.getLastLoadEvent();
-  
-  // 构建项目状态
-  const projectState: ProjectLoadState | undefined = currentProject ? {
+  const projectPool = daemonState.getProjectPool();
+  const memoryMonitor = daemonState.getMemoryMonitor();
+  const autoScaler = daemonState.getAutoScaler();
+  const config = loadDaemonConfig();
+
+  // 构建项目状态（单项目/当前项目）
+  const currentIndexProgress = currentProject ? daemonState.getIndexProgress(currentProject) : undefined;
+  const projectState: any = currentProject ? {
     path: currentProject,
     status: isReady ? 'ready' : initProgress.stage === 'error' ? 'error' : 'loading',
     loadTime: lastLoadEvent?.loadTime,
     progress: isReady ? undefined : initProgress,
     lastAccess: Date.now(),
     priority: 0,
+    indexProgress: currentIndexProgress || { stage: 'not_started', percent: 0 },
   } : undefined;
+
+  // 添加当前项目的 processMemory
+  if (projectState && memoryMonitor && currentProject) {
+    const pid = projectPool
+      ? projectPool.getProjectPid(currentProject)
+      : daemonState.getClient()?.getChildPid();
+    if (pid) {
+      try {
+        const mem = await memoryMonitor.getProcessMemory(pid, currentProject);
+        projectState.processMemory = { pid: mem.pid, rssMB: mem.rssMB, timestamp: mem.timestamp };
+      } catch { /* non-critical */ }
+    }
+  }
 
   // 确定整体状态
   let overallStatus: 'idle' | 'starting' | 'initializing' | 'indexing' | 'ready' | 'error';
@@ -245,7 +287,6 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
   } else if (initProgress.stage === 'error') {
     overallStatus = 'error';
   } else {
-    // 映射阶段到整体状态
     const stageMap: Record<InitStage, typeof overallStatus> = {
       'idle': 'idle',
       'starting': 'starting',
@@ -258,18 +299,102 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
     overallStatus = stageMap[initProgress.stage];
   }
 
-  const config = loadDaemonConfig();
+  // ---- 多项目列表（含索引进度 + 进程内存） ----
+  let projects: any[] | undefined;
+  if (projectPool && projectPool.size > 0) {
+    const projectList = projectPool.listProjects();
+    projects = await Promise.all(
+      projectList.map(async (p: { path: string; status: string; lastAccess: number; priority: number }) => {
+        const entry: any = {
+          path: p.path,
+          status: p.status,
+          loadTime: projectPool.getProjectLoadTime(p.path),
+          lastAccess: p.lastAccess,
+          priority: p.priority,
+          indexProgress: daemonState.getIndexProgress(p.path) || { stage: 'not_started', percent: 0 },
+        };
+        // 进程内存
+        if (memoryMonitor) {
+          const pid = projectPool.getProjectPid(p.path);
+          if (pid) {
+            try {
+              const mem = await memoryMonitor.getProcessMemory(pid, p.path);
+              entry.processMemory = { pid: mem.pid, rssMB: mem.rssMB, timestamp: mem.timestamp };
+            } catch { /* non-critical */ }
+          }
+        }
+        return entry;
+      })
+    );
+  }
+
+  // ---- Memory section ----
+  let memory: any = undefined;
+  if (memoryMonitor) {
+    const snapshot = memoryMonitor.getLatestSnapshot();
+    const degraded = memoryMonitor.isDegraded();
+    const stale = memoryMonitor.isSnapshotStale();
+
+    // 推导 degraded/stale 的原因（设计 2.3.3）
+    let reason: string | undefined;
+    if (degraded) {
+      reason = 'All memory collection methods failed';
+    } else if (!snapshot) {
+      reason = 'No snapshot collected yet';
+    } else if (stale) {
+      reason = `Snapshot expired (age: ${Math.floor((Date.now() - snapshot.timestamp) / 1000)}s)`;
+    }
+
+    memory = {
+      platform: process.platform,
+      pressureLevel: memoryMonitor.getPressureLevel(),
+      source: snapshot?.source ?? 'none',
+      snapshotAgeMs: snapshot ? Date.now() - snapshot.timestamp : undefined,
+      snapshotStale: stale,
+      snapshot: snapshot ? { ...snapshot } : null,
+      consecutiveFailures: memoryMonitor.getConsecutiveFailures(),
+      degraded,
+      reason,
+    };
+  }
+
+  // ---- AutoScaling section ----
+  let autoScaling: any = undefined;
+  if (autoScaler) {
+    const decision = autoScaler.getLatestDecision();
+    const coreConfig = loadCoreConfig();
+    const runtimeConfig = loadDaemonConfig();
+    const projectAsConfig = coreConfig.daemon?.autoScaling;
+    const runtimeAsConfig = runtimeConfig.autoScaling;
+
+    // 运行时配置（可热更新）覆盖项目级配置
+    const effectiveMaxProjects =
+      runtimeAsConfig?.maxProjects ?? projectAsConfig?.maxProjects ?? coreConfig.daemon?.maxProjects ?? 3;
+
+    autoScaling = {
+      enabled: autoScaler.enabled,
+      degraded: decision?.degraded ?? false,
+      currentProjectCount: projectPool?.size ?? (currentProject ? 1 : 0),
+      capacity: decision?.capacity ?? (projectPool?.size ?? (currentProject ? 1 : 0)),
+      maxProjects: effectiveMaxProjects,
+      lastScaleAction: decision?.action,
+      lastScaleTime: decision?.timestamp,
+    };
+  }
+
   sendResponse(res, {
     success: true,
     data: {
       status: overallStatus,
       progress: initProgress.stage !== 'idle' && initProgress.stage !== 'ready' ? initProgress : undefined,
       project: projectState,
+      projects,
+      memory,
+      autoScaling,
       uptime: process.uptime(),
       pid: process.pid,
       version: PACKAGE_VERSION,
       startTime: daemonState.getStartTime(),
-      // SP05：warnings + library resolve 开关
       warnings: daemonState.warnings.slice(-10),
       libraryResolveEnabled: config.libraryResolveEnabled,
     },
@@ -755,6 +880,25 @@ async function handleLibraryResolve(body: any, res: http.ServerResponse, startTi
 }
 
 /**
+ * 将点号分隔的 key 路径展开为嵌套对象。
+ * 例如 "autoScaling.enabled" → { autoScaling: { enabled: value } }
+ */
+function buildNestedConfig(key: string, value: unknown): Record<string, unknown> {
+  const parts = key.split('.');
+  if (parts.length === 1) {
+    return { [key]: value };
+  }
+  const result: Record<string, unknown> = {};
+  let current = result;
+  for (let i = 0; i < parts.length - 1; i++) {
+    current[parts[i]] = {};
+    current = current[parts[i]] as Record<string, unknown>;
+  }
+  current[parts[parts.length - 1]] = value;
+  return result;
+}
+
+/**
  * 配置热更新
  * body: { key: string, value: unknown }
  *
@@ -774,7 +918,8 @@ async function handleConfig(body: any, res: http.ServerResponse, startTime: numb
       return;
     }
 
-    const partial: Record<string, unknown> = { [key]: value };
+    // 支持点号分隔的嵌套路径，如 "autoScaling.enabled" → { autoScaling: { enabled: value } }
+    const partial = buildNestedConfig(key, value);
     const updated = saveDaemonConfig(partial as any);
 
     // 刷新 uriRewriter 内部配置缓存

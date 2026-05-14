@@ -29,6 +29,12 @@ export interface LibraryProviderConfig {
   decompiler: DecompilerKind;
   /** 是否在 daemon 启动时预取直接依赖 sources jar（SP05） */
   warmupEnabled: boolean;
+  /** 自动伸缩运行时配置（可热更新） */
+  autoScaling?: {
+    enabled?: boolean;
+    maxProjects?: number;
+    minProjects?: number;
+  };
 }
 
 export const DEFAULT_CONFIG: LibraryProviderConfig = {
@@ -61,6 +67,12 @@ export function mergeConfig(
   }
   if (typeof partial.warmupEnabled === 'boolean') {
     merged.warmupEnabled = partial.warmupEnabled;
+  }
+  if (partial.autoScaling && typeof partial.autoScaling === 'object') {
+    merged.autoScaling = {
+      ...merged.autoScaling,
+      ...partial.autoScaling,
+    };
   }
   return merged;
 }

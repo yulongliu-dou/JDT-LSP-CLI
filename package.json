@@ -1,6 +1,6 @@
 {
   "name": "jdt-lsp-cli",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "CLI tool for Java LSP operations, enabling AI agents to call Java language features from the command line",
   "main": "dist/index.js",
   "bin": {
@@ -13,7 +13,7 @@
     "link": "npm run build && npm link",
     "prepublishOnly": "npm run build",
     "update-version": "node scripts/update-version.js",
-    "test": "jest",
+    "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:unit": "jest test/unit",

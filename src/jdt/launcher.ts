@@ -56,6 +56,9 @@ export class JdtLauncher {
     const args: string[] = [];
     const cfg = this.jvmConfig;
 
+    // macOS headless fix: 防止 Activity Monitor 显示"未响应"
+    args.push('-Djava.awt.headless=true');
+
     // 内存配置
     args.push(`-Xms${cfg.xms}`);
     args.push(`-Xmx${cfg.xmx}`);

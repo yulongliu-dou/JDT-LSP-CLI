@@ -284,6 +284,7 @@ export interface DaemonConfigOptions {
   idleTimeoutMinutes: number; // 空闲超时（分钟），0 表示不超时
   maxProjects: number;       // 最大同时活跃项目数（默认 1）
   perProjectMemory: string;  // 每项目内存限制（如 "1g"）
+  autoScaling?: AutoScalingConfig; // 自动伸缩配置
 }
 
 /**
@@ -358,6 +359,90 @@ export interface ProjectLoadState {
   priority: number;
 }
 
+// ========== Memory Monitoring ==========
+
+export interface MemorySnapshot {
+  platform: 'darwin' | 'win32';
+  timestamp: number;
+  totalMB: number;
+  freeMB: number;
+  usedPercent: number;
+  /** macOS: memory_pressure 解析的 page size */
+  pageSize?: number;
+  /** macOS: swap 使用量 (MB) */
+  swapUsedMB?: number;
+  /** macOS: System-wide memory free percentage */
+  memoryPressureFreePercent?: number;
+  /** Windows: Available MBytes */
+  availableMB?: number;
+  /** Windows: % Committed Bytes In Use */
+  commitPercent?: number;
+  /** 数据来源 */
+  source: 'memory_pressure' | 'sysctl_swap' | 'perf_counter' | 'cim_instance' | 'node_os';
+  /** 采集耗时 (ms) */
+  collectionDurationMs?: number;
+  /** 采集错误信息 */
+  error?: string;
+}
+
+export type PressureLevel = 'low' | 'moderate' | 'high' | 'critical' | 'unknown';
+
+// ========== Project Process Memory ==========
+
+export interface ProjectMemorySnapshot {
+  projectPath: string;
+  pid: number;
+  rssMB: number;
+  heapUsedMB?: number;
+  heapTotalMB?: number;
+  timestamp: number;
+}
+
+// ========== Auto-Scaling ==========
+
+export interface ScaleAction {
+  action: 'relax_capacity' | 'shrink' | 'evict_idle' | 'none';
+  reason: string;
+  targetProject?: string;
+}
+
+export interface ScaleDecision {
+  timestamp: number;
+  degraded: boolean;
+  degradedReason?: string;
+  currentCount: number;
+  capacity: number;
+  pressureLevel: PressureLevel;
+  action: ScaleAction;
+  snapshotAgeMs?: number;
+  snapshotStale?: boolean;
+}
+
+export interface AutoScalingConfig {
+  enabled: boolean;
+  minProjects: number;
+  maxProjects: number;
+  scaleCooldownSeconds: number;
+  checkIntervalSeconds: number;
+  idleEvictMinutes: number;
+  maxSnapshotAgeMs: number;
+  drainTimeoutMs: number;
+  collectionTimeoutMs: number;
+  memoryThresholds?: Record<string, number>;
+}
+
+// ========== Index Progress ==========
+
+export interface IndexProgress {
+  stage: 'not_started' | 'in_progress' | 'completed' | 'stalled';
+  title?: string;
+  percent?: number;
+  message?: string;
+  lastUpdated: number;
+}
+
+// ========== Response Metadata ==========
+
 /**
  * 响应元数据 - 提供关于响应本身的附加信息
  */
@@ -387,6 +472,8 @@ export interface ResponseMetadata {
     line: number;    // 1-based 行号
     col: number;     // 1-based 列号
   };
+  /** 是否索引已完成（所有 LSP 查询端点附加） */
+  indexingComplete?: boolean;
 }
 
 export interface CLIResult<T> {

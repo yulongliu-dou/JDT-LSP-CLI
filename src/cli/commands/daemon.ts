@@ -30,6 +30,16 @@ function formatDateTime(d: Date): string {
 }
 
 /**
+ * 解析 CLI 传入的配置值为合适的类型（bool / number / string）
+ */
+function parseConfigValue(raw: string): unknown {
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return parseFloat(raw);
+  return raw;
+}
+
+/**
  * 注册 daemon 命令
  */
 export function registerDaemon(program: Command): void {
@@ -114,16 +124,17 @@ export function registerDaemon(program: Command): void {
   daemonCmd
     .command('status')
     .description('Check daemon status')
-    .action(async () => {
+    .option('-v, --verbose', 'Show detailed status (memory, auto-scaling, projects)')
+    .action(async (cmdOpts) => {
       const status = getDaemonStatus();
-      
+
       if (!status.running) {
         console.log('Daemon status: NOT RUNNING');
         console.log(`Port: ${status.port}`);
         console.log('\nStart with: jls daemon start');
         process.exit(0);
       }
-      
+
       console.log('Daemon status: RUNNING');
       console.log(`PID: ${status.pid}`);
       console.log(`Port: ${status.port}`);
@@ -133,23 +144,166 @@ export function registerDaemon(program: Command): void {
       if (status.startTime) {
         console.log(`Started: ${formatDateTime(new Date(status.startTime))}`);
       }
-      
+
       try {
         const result = await sendDaemonRequest('/status', {});
         if (result.success && result.data) {
-          const projectPath = result.data.project?.path || result.data.project || 'none';
+          const d = result.data;
+          const projectPath = d.project?.path || 'none';
           console.log(`Project: ${projectPath}`);
-          console.log(`Status: ${result.data.status}`);
-          console.log(`Uptime: ${Math.floor(result.data.uptime)}s`);
-          if (result.data.version && !status.version) {
-            console.log(`Version: ${result.data.version}`);
+          console.log(`Status: ${d.status}`);
+          console.log(`Uptime: ${Math.floor(d.uptime)}s`);
+          if (d.version && !status.version) {
+            console.log(`Version: ${d.version}`);
           }
-          if (result.data.startTime && !status.startTime) {
-            console.log(`Started: ${formatDateTime(new Date(result.data.startTime))}`);
+          if (d.startTime && !status.startTime) {
+            console.log(`Started: ${formatDateTime(new Date(d.startTime))}`);
+          }
+
+          // --verbose: 完整状态
+          if (cmdOpts.verbose) {
+            console.log('');
+
+            // Memory
+            if (d.memory) {
+              const m = d.memory;
+              console.log('── Memory ──');
+              console.log(`  Platform:      ${m.platform}`);
+              console.log(`  Pressure:      ${m.pressureLevel}`);
+              console.log(`  Source:        ${m.source}`);
+              console.log(`  Snapshot Age:  ${m.snapshotAgeMs != null ? Math.floor(m.snapshotAgeMs) + 'ms' : 'N/A'}`);
+              console.log(`  Stale:         ${m.snapshotStale}`);
+              console.log(`  Degraded:      ${m.degraded}${m.reason ? ` (${m.reason})` : ''}`);
+              console.log(`  Failures:      ${m.consecutiveFailures}`);
+              if (m.snapshot) {
+                const s = m.snapshot;
+                console.log(`  Total MB:      ${s.totalMB}`);
+                console.log(`  Free MB:       ${s.freeMB}`);
+                console.log(`  Used %:        ${s.usedPercent?.toFixed(1)}%`);
+                if (s.availableMB != null) console.log(`  Available MB:  ${s.availableMB}`);
+                if (s.commitPercent != null) console.log(`  Commit %:      ${s.commitPercent}%`);
+                if (s.swapUsedMB != null) console.log(`  Swap MB:       ${s.swapUsedMB}`);
+                if (s.pageSize) console.log(`  Page Size:     ${s.pageSize}`);
+                if (s.collectionDurationMs) console.log(`  Collect Time:  ${s.collectionDurationMs}ms`);
+              }
+              console.log('');
+            }
+
+            // Auto-scaling
+            if (d.autoScaling) {
+              const a = d.autoScaling;
+              console.log('── Auto-Scaling ──');
+              console.log(`  Enabled:       ${a.enabled}`);
+              console.log(`  Degraded:      ${a.degraded}`);
+              console.log(`  Projects:      ${a.currentProjectCount} / ${a.capacity} (max ${a.maxProjects})`);
+              if (a.lastScaleAction) {
+                console.log(`  Last Action:   ${a.lastScaleAction.action} — ${a.lastScaleAction.reason}`);
+                if (a.lastScaleAction.targetProject) {
+                  console.log(`  Target:        ${a.lastScaleAction.targetProject}`);
+                }
+              }
+              if (a.lastScaleTime) {
+                const age = Math.floor((Date.now() - a.lastScaleTime) / 1000);
+                console.log(`  Last Scale:    ${age}s ago`);
+              }
+              console.log('');
+            }
+
+            // Projects detail
+            if (d.projects && d.projects.length > 0) {
+              console.log('── Projects ──');
+              for (const p of d.projects) {
+                const age = Math.floor((Date.now() - p.lastAccess) / 1000);
+                const idx = p.indexProgress;
+                console.log(`  ${p.path}`);
+                console.log(`    Status:     ${p.status}  Priority: ${p.priority}  Idle: ${age}s`);
+                if (p.loadTime) console.log(`    Load Time:  ${p.loadTime}ms`);
+                if (idx) console.log(`    Index:      ${idx.stage}${idx.percent != null ? ' (' + idx.percent + '%)' : ''}${idx.title ? ' — ' + idx.title : ''}`);
+                if (p.processMemory && p.processMemory.rssMB >= 0) {
+                  console.log(`    RSS:        ${p.processMemory.rssMB} MB  (PID ${p.processMemory.pid})`);
+                }
+              }
+              console.log('');
+            }
+
+            // Warnings
+            if (d.warnings && d.warnings.length > 0) {
+              console.log('── Warnings ──');
+              for (const w of d.warnings) {
+                console.log(`  ⚠ ${w}`);
+              }
+              console.log('');
+            }
+
+            // Library resolve
+            console.log(`Library Resolve: ${d.libraryResolveEnabled ? 'enabled' : 'disabled'}`);
           }
         }
       } catch (e) {
         // ignore
+      }
+    });
+
+  // daemon memory
+  daemonCmd
+    .command('memory')
+    .description('Show current memory snapshot and pressure level')
+    .action(async () => {
+      const status = getDaemonStatus();
+      if (!status.running) {
+        console.log('Daemon is not running');
+        process.exit(1);
+      }
+
+      try {
+        const result = await sendDaemonRequest('/status', {});
+        if (result.success && result.data?.memory) {
+          const m = result.data.memory;
+          console.log('── System Memory ──');
+          console.log(`Platform:      ${m.platform}`);
+          console.log(`Pressure:      ${m.pressureLevel}`);
+          console.log(`Source:        ${m.source}`);
+          console.log(`Degraded:      ${m.degraded}${m.reason ? ` (${m.reason})` : ''}`);
+          console.log(`Snapshot Age:  ${m.snapshotAgeMs != null ? Math.floor(m.snapshotAgeMs) + 'ms' : 'N/A'}`);
+          console.log(`Stale:         ${m.snapshotStale}`);
+          console.log(`Failures:      ${m.consecutiveFailures}`);
+
+          if (m.snapshot) {
+            const s = m.snapshot;
+            console.log('');
+            console.log('── Snapshot ──');
+            console.log(`Total MB:      ${s.totalMB}`);
+            console.log(`Free MB:       ${s.freeMB}`);
+            console.log(`Used:          ${s.usedPercent?.toFixed(1)}%`);
+            if (s.availableMB != null) console.log(`Available MB:  ${s.availableMB}`);
+            if (s.commitPercent != null) console.log(`Commit %:      ${s.commitPercent}%`);
+            if (s.memoryPressureFreePercent != null) console.log(`Free %:        ${s.memoryPressureFreePercent}%`);
+            if (s.swapUsedMB != null) console.log(`Swap MB:       ${s.swapUsedMB}`);
+            if (s.pageSize) console.log(`Page Size:     ${s.pageSize}`);
+            if (s.collectionDurationMs) console.log(`Collect Time:  ${s.collectionDurationMs}ms`);
+          }
+
+          // Also show per-project RSS if available
+          if (result.data.projects && result.data.projects.length > 0) {
+            console.log('');
+            console.log('── Project RSS ──');
+            for (const p of result.data.projects) {
+              if (p.processMemory && p.processMemory.rssMB >= 0) {
+                console.log(`  ${p.processMemory.rssMB} MB  — ${p.path}  (PID ${p.processMemory.pid})`);
+              } else {
+                console.log(`  N/A  — ${p.path}`);
+              }
+            }
+          }
+        } else if (result.success && !result.data?.memory) {
+          console.log('Memory monitoring not available (single-project mode or auto-scaling disabled)');
+        } else {
+          console.log('Failed to get memory info');
+          process.exit(1);
+        }
+      } catch (e) {
+        console.error('Failed to get memory info');
+        process.exit(1);
       }
     });
 
@@ -194,7 +348,7 @@ export function registerDaemon(program: Command): void {
         console.log('Daemon is not running');
         process.exit(1);
       }
-      
+
       try {
         const result = await sendDaemonRequest('/release', { project });
         if (result.success) {
@@ -205,6 +359,64 @@ export function registerDaemon(program: Command): void {
         }
       } catch (e) {
         console.error('Failed to release project');
+        process.exit(1);
+      }
+    });
+
+  // daemon config（热更新自动伸缩等运行时配置，设计 3.6）
+  daemonCmd
+    .command('config')
+    .description('Hot-update daemon runtime configuration')
+    .option('--auto-scaling <key=value>', 'Set auto-scaling config (e.g. enabled=false)')
+    .option('--key <key>', 'Arbitrary config key (supports dot-notation)')
+    .option('--value <value>', 'Config value for --key')
+    .action(async (cmdOpts) => {
+      const status = getDaemonStatus();
+      if (!status.running) {
+        console.log('Daemon is not running');
+        process.exit(1);
+      }
+
+      try {
+        let key: string | undefined;
+        let value: unknown;
+
+        if (cmdOpts.autoScaling) {
+          // --auto-scaling enabled=false → key=autoScaling.enabled, value=false
+          const match = cmdOpts.autoScaling.match(/^(\w+)=(.+)$/);
+          if (!match) {
+            console.error(`Invalid --auto-scaling format: "${cmdOpts.autoScaling}"`);
+            console.error('Expected: <key>=<value> (e.g. enabled=false)');
+            process.exit(1);
+          }
+          key = `autoScaling.${match[1]}`;
+          value = parseConfigValue(match[2]);
+        } else if (cmdOpts.key) {
+          key = cmdOpts.key;
+          value = parseConfigValue(cmdOpts.value ?? '');
+        } else {
+          console.error('No config option specified. Use --auto-scaling or --key/--value.');
+          console.error('Examples:');
+          console.error('  jls daemon config --auto-scaling enabled=false');
+          console.error('  jls daemon config --key cacheTtlDays --value 14');
+          process.exit(1);
+        }
+
+        const result = await sendDaemonRequest('/config', { key, value });
+        if (result.success) {
+          console.log(`Config updated: ${key} = ${JSON.stringify(value)}`);
+          if (result.data?.updated) {
+            const autoScaling = result.data.updated.autoScaling;
+            if (autoScaling) {
+              console.log('Auto-scaling runtime config:', JSON.stringify(autoScaling));
+            }
+          }
+        } else {
+          console.error('Failed to update config:', (result as any).error);
+          process.exit(1);
+        }
+      } catch (e: any) {
+        console.error('Failed to update config:', e?.message || e);
         process.exit(1);
       }
     });

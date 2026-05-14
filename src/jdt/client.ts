@@ -285,6 +285,20 @@ export class JdtLsClient {
   getJavaExecutable(): string {
     return this.launcher.getJavaExecutable();
   }
+
+  /**
+   * 获取 JDT LS 子进程 PID（用于进程内存采集）
+   */
+  getChildPid(): number | null {
+    return this.connectionManager.getProcess()?.pid ?? null;
+  }
+
+  /**
+   * 设置 LSP $/progress 通知回调（索引进度追踪）
+   */
+  setProgressNotificationHandler(handler: (params: any) => void): void {
+    this.connectionManager.setProgressNotificationHandler(handler);
+  }
 }
 
 // 重新导出配置相关函数

@@ -111,9 +111,14 @@ async function doInitClient(projectPath: string, options: Partial<CLIOptions>): 
     
     // 设置进度回调
     activeClient.setProgressCallback((stage: string, percent: number, message: string) => {
-      const mappedStage: InitStage = stage === 'initializing' ? 'initializing' : 
+      const mappedStage: InitStage = stage === 'initializing' ? 'initializing' :
                                      stage === 'indexing' ? 'indexing' : 'starting';
       daemonState.updateProgress(mappedStage, percent, message);
+    });
+
+    // 索引进度追踪：拦截 $/progress 通知
+    activeClient.setProgressNotificationHandler((params: any) => {
+      daemonState.updateIndexProgress(projectPath, params);
     });
     
     try {

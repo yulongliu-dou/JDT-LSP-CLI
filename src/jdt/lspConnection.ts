@@ -45,6 +45,7 @@ export class LspConnectionManager {
   private process: ChildProcess | null = null;
   private initialized = false;
   private options: CLIOptions;
+  private progressHandler?: (params: any) => void;
 
   constructor(options: CLIOptions) {
     this.options = options;
@@ -71,6 +72,14 @@ export class LspConnectionManager {
     );
 
     this.connection.listen();
+
+    // 拦截 $/progress 通知用于索引进度追踪
+    this.connection.onNotification('$/progress', (params: any) => {
+      if (this.progressHandler) {
+        this.progressHandler(params);
+      }
+    });
+
     return this.connection;
   }
 
@@ -380,5 +389,12 @@ export class LspConnectionManager {
    */
   getProcess(): ChildProcess | null {
     return this.process;
+  }
+
+  /**
+   * 设置 $/progress 通知回调
+   */
+  setProgressNotificationHandler(handler: (params: any) => void): void {
+    this.progressHandler = handler;
   }
 }
