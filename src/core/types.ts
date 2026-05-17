@@ -273,6 +273,10 @@ export interface JvmConfig {
   maxGCPauseMillis: number;         // 最大 GC 暂停时间（毫秒）
   useStringDeduplication: boolean;  // 启用字符串去重
   softRefLRUPolicyMSPerMB: number;  // 软引用清理策略
+  g1PeriodicGCIntervalMs: number;   // G1 空闲周期 GC 间隔（毫秒），0=禁用
+  maxHeapFreeRatio: number;         // GC 后空闲堆超过此比例则收缩归还 OS
+  minHeapFreeRatio: number;         // GC 后空闲堆低于此比例则扩容
+  maxMetaspaceSize: string;         // 元数据区上限，如 '256m'
   extraArgs: string[];              // 额外的 JVM 参数
 }
 
@@ -282,7 +286,7 @@ export interface JvmConfig {
 export interface DaemonConfigOptions {
   port: number;              // HTTP 服务端口
   idleTimeoutMinutes: number; // 空闲超时（分钟），0 表示不超时
-  maxProjects: number;       // 最大同时活跃项目数（默认 1）
+  maxProjects: number;       // 最大同时活跃项目数（默认 3）
   perProjectMemory: string;  // 每项目内存限制（如 "1g"）
   autoScaling?: AutoScalingConfig; // 自动伸缩配置
 }

@@ -58,11 +58,19 @@ export class ProjectPool {
   }
 
   /**
+   * 路径规范化：resolve + Windows 大小写不敏感
+   */
+  private normalizePath(p: string): string {
+    const resolved = path.resolve(p);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  }
+
+  /**
    * 获取项目客户端（如果不存在则创建）
    * @returns 客户端和加载事件信息
    */
   async getClient(projectPath: string, options: Partial<CLIOptions> = {}): Promise<{ client: JdtLsClient; loadEvent?: ProjectLoadEvent }> {
-    const normalizedPath = path.resolve(projectPath);
+    const normalizedPath = this.normalizePath(projectPath);
     
     // 检查现有客户端
     const existing = this.clients.get(normalizedPath);
@@ -92,7 +100,7 @@ export class ProjectPool {
     
     // 检查容量，必要时淘汰
     let evictedProject: string | undefined;
-    const maxProjects = this.config.daemon?.maxProjects || 1;
+    const maxProjects = this.config.daemon?.maxProjects ?? 3;
     if (this.clients.size >= maxProjects) {
       evictedProject = await this.evictLRU();
     }
@@ -224,7 +232,7 @@ export class ProjectPool {
    * 释放指定项目
    */
   async releaseProject(projectPath: string): Promise<boolean> {
-    const normalizedPath = path.resolve(projectPath);
+    const normalizedPath = this.normalizePath(projectPath);
     const pc = this.clients.get(normalizedPath);
     
     if (!pc) {
@@ -247,7 +255,7 @@ export class ProjectPool {
    * 获取项目 JDT LS 子进程 PID
    */
   getProjectPid(projectPath: string): number | null {
-    const normalizedPath = path.resolve(projectPath);
+    const normalizedPath = this.normalizePath(projectPath);
     const pc = this.clients.get(normalizedPath);
     if (!pc) return null;
     return pc.client.getChildPid();
@@ -257,7 +265,7 @@ export class ProjectPool {
    * 获取项目加载耗时（毫秒）
    */
   getProjectLoadTime(projectPath: string): number | undefined {
-    const normalizedPath = path.resolve(projectPath);
+    const normalizedPath = this.normalizePath(projectPath);
     const pc = this.clients.get(normalizedPath);
     return pc?.loadEvent?.loadTime;
   }
@@ -301,14 +309,14 @@ export class ProjectPool {
    * 检查项目是否已加载
    */
   hasProject(projectPath: string): boolean {
-    return this.clients.has(path.resolve(projectPath));
+    return this.clients.has(this.normalizePath(projectPath));
   }
 
   /**
    * 标记项目为待释放（draining）
    */
   markDraining(projectPath: string): boolean {
-    const normalizedPath = path.resolve(projectPath);
+    const normalizedPath = this.normalizePath(projectPath);
     const pc = this.clients.get(normalizedPath);
     if (!pc) return false;
     pc.draining = true;
@@ -319,7 +327,7 @@ export class ProjectPool {
    * 取消 draining 标记
    */
   unmarkDraining(projectPath: string): void {
-    const normalizedPath = path.resolve(projectPath);
+    const normalizedPath = this.normalizePath(projectPath);
     const pc = this.clients.get(normalizedPath);
     if (pc) pc.draining = false;
   }
@@ -328,7 +336,7 @@ export class ProjectPool {
    * 增加活跃请求计数
    */
   incrementRequests(projectPath: string): void {
-    const normalizedPath = path.resolve(projectPath);
+    const normalizedPath = this.normalizePath(projectPath);
     const pc = this.clients.get(normalizedPath);
     if (pc) pc.activeRequests++;
   }
@@ -337,7 +345,7 @@ export class ProjectPool {
    * 减少活跃请求计数
    */
   decrementRequests(projectPath: string): void {
-    const normalizedPath = path.resolve(projectPath);
+    const normalizedPath = this.normalizePath(projectPath);
     const pc = this.clients.get(normalizedPath);
     if (pc && pc.activeRequests > 0) pc.activeRequests--;
   }
@@ -346,7 +354,7 @@ export class ProjectPool {
    * 获取活跃请求数
    */
   getActiveRequestCount(projectPath: string): number {
-    const normalizedPath = path.resolve(projectPath);
+    const normalizedPath = this.normalizePath(projectPath);
     const pc = this.clients.get(normalizedPath);
     return pc ? pc.activeRequests : 0;
   }
@@ -355,7 +363,7 @@ export class ProjectPool {
    * 检查项目是否处于 draining 状态
    */
   isDraining(projectPath: string): boolean {
-    const normalizedPath = path.resolve(projectPath);
+    const normalizedPath = this.normalizePath(projectPath);
     const pc = this.clients.get(normalizedPath);
     return pc ? pc.draining : false;
   }

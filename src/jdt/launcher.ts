@@ -67,11 +67,29 @@ export class JdtLauncher {
     if (cfg.useG1GC) {
       args.push('-XX:+UseG1GC');
       args.push(`-XX:MaxGCPauseMillis=${cfg.maxGCPauseMillis}`);
-      
+
       // 字符串去重（仅 G1GC 支持）
       if (cfg.useStringDeduplication) {
         args.push('-XX:+UseStringDeduplication');
       }
+
+      // G1 空闲周期 GC — 触发 heap shrink 的前提 (JDK 12+)
+      if (cfg.g1PeriodicGCIntervalMs > 0) {
+        args.push(`-XX:G1PeriodicGCInterval=${cfg.g1PeriodicGCIntervalMs}`);
+      }
+    }
+
+    // 堆空闲比例控制 — 控制何时收缩/扩容堆
+    if (cfg.maxHeapFreeRatio > 0) {
+      args.push(`-XX:MaxHeapFreeRatio=${cfg.maxHeapFreeRatio}`);
+    }
+    if (cfg.minHeapFreeRatio > 0) {
+      args.push(`-XX:MinHeapFreeRatio=${cfg.minHeapFreeRatio}`);
+    }
+
+    // 元数据区上限 — 防止无限膨胀
+    if (cfg.maxMetaspaceSize) {
+      args.push(`-XX:MaxMetaspaceSize=${cfg.maxMetaspaceSize}`);
     }
 
     // 软引用清理策略

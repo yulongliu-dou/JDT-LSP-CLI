@@ -149,10 +149,27 @@ export function registerDaemon(program: Command): void {
         const result = await sendDaemonRequest('/status', {});
         if (result.success && result.data) {
           const d = result.data;
-          const projectPath = d.project?.path || 'none';
-          console.log(`Project: ${projectPath}`);
           console.log(`Status: ${d.status}`);
           console.log(`Uptime: ${Math.floor(d.uptime)}s`);
+
+          // 多项目/单项目自适应展示
+          if (d.projects && d.projects.length > 0) {
+            const maxProjects = d.autoScaling?.maxProjects;
+            const header = maxProjects
+              ? `Projects (${d.projects.length}/${maxProjects}):`
+              : `Projects (${d.projects.length}):`;
+            console.log(header);
+            for (const p of d.projects) {
+              const age = Math.floor((Date.now() - p.lastAccess) / 1000);
+              const ageStr = age < 60 ? `${age}s ago`
+                : age < 3600 ? `${Math.floor(age / 60)}m ago`
+                : `${Math.floor(age / 3600)}h ago`;
+              const displayPath = p.path.length > 50 ? '...' + p.path.slice(-47) : p.path;
+              console.log(`  ${displayPath.padEnd(52)} ${p.status.padEnd(12)} ${ageStr}`);
+            }
+          } else {
+            console.log('Projects: none');
+          }
           if (d.version && !status.version) {
             console.log(`Version: ${d.version}`);
           }
@@ -359,6 +376,35 @@ export function registerDaemon(program: Command): void {
         }
       } catch (e) {
         console.error('Failed to release project');
+        process.exit(1);
+      }
+    });
+
+  // daemon stop-project
+  daemonCmd
+    .command('stop-project <projectPath>')
+    .description('Gracefully stop a loaded project (waits for in-flight requests)')
+    .option('--force', 'Skip draining and force stop immediately')
+    .action(async (projectPath: string, cmdOpts) => {
+      const status = getDaemonStatus();
+      if (!status.running) {
+        console.log('Daemon is not running');
+        process.exit(1);
+      }
+
+      try {
+        const result = await sendDaemonRequest('/stop-project', {
+          project: projectPath,
+          force: cmdOpts.force || false,
+        });
+        if (result.success) {
+          console.log(`Project stopped: ${result.data?.project || projectPath}`);
+        } else {
+          console.error(`Failed to stop project: ${result.error}`);
+          process.exit(1);
+        }
+      } catch (e) {
+        console.error('Failed to stop project');
         process.exit(1);
       }
     });

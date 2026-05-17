@@ -119,7 +119,7 @@ export async function startDaemon(port: number = DEFAULT_PORT, options?: { eager
   }
 
   // 初始化项目池（如果启用多项目模式）
-  const maxProjects = config.daemon?.maxProjects || 1;
+  const maxProjects = config.daemon?.maxProjects ?? 3;
   if (maxProjects > 1 || options?.multiProject) {
     daemonState.log('Multi-project mode enabled, max projects:', maxProjects);
     console.log(`Multi-project mode enabled (max ${maxProjects} projects)`);

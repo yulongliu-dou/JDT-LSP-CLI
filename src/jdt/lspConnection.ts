@@ -338,34 +338,30 @@ export class LspConnectionManager {
   }
 
   /**
-   * 关闭连接
+   * 关闭连接（带超时保护，确保进程终止）
    */
-  async stop(): Promise<void> {
+  async stop(timeoutMs: number = 10000): Promise<void> {
+    // 先尝试优雅关闭
     if (this.connection) {
       try {
-        // 发送 shutdown 请求
-        await this.connection.sendRequest(ShutdownRequest.type.method);
-        
-        // 发送 exit 通知
+        await Promise.race([
+          this.connection.sendRequest(ShutdownRequest.type.method),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Shutdown timeout')), timeoutMs),
+          ),
+        ]);
         await this.connection.sendNotification(ExitNotification.type.method);
-        
-        this.connection.dispose();
-        this.connection = null;
-        this.initialized = false;
-        
-        this.log('LSP connection closed');
-      } catch (error) {
-        this.log('Error closing connection:', error);
+      } catch {
+        // 超时或 error — 跳过优雅关闭
       }
+      try { this.connection.dispose(); } catch {}
+      this.connection = null;
+      this.initialized = false;
     }
 
-    // 终止进程
+    // 无论优雅关闭是否成功，强制杀进程
     if (this.process) {
-      try {
-        this.process.kill();
-      } catch (error) {
-        // ignore
-      }
+      try { this.process.kill(); } catch {}
       this.process = null;
     }
   }

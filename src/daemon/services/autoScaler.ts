@@ -284,7 +284,7 @@ export class AutoScaler {
    * Otherwise default ceiling is 3.
    */
   private getEffectiveMaxProjects(): number {
-    const configured = this.config.daemon?.maxProjects ?? 1;
+    const configured = this.config.daemon?.maxProjects ?? 3;
     const autoScalingMax = this.config.daemon?.autoScaling?.maxProjects ?? 3;
     if (configured > 3) return configured;
     return autoScalingMax;

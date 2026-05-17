@@ -26,6 +26,12 @@ export const DEFAULT_JVM_XMX = '2g';
 export const DEFAULT_GC_PAUSE_MS = 200;
 export const DEFAULT_SOFT_REF_LRU_MS_PER_MB = 50;
 
+// JRE 21+ 内存归还策略
+export const DEFAULT_G1_PERIODIC_GC_INTERVAL_MS = 30000;
+export const DEFAULT_MAX_HEAP_FREE_RATIO = 30;
+export const DEFAULT_MIN_HEAP_FREE_RATIO = 25;
+export const DEFAULT_MAX_METASPACE_SIZE = '256m';
+
 // LSP 相关常量
 export const LSP_INITIALIZE_TIMEOUT = 300000; // 5 分钟
 export const LSP_SHUTDOWN_TIMEOUT = 10000;    // 10 秒

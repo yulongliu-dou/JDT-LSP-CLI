@@ -12,6 +12,12 @@ import { CLIOptions, SymbolKindMap, JvmConfig, DaemonConfig } from '../core/type
 import { JdtLauncher } from './launcher';
 import { LspConnectionManager } from './lspConnection';
 
+/**
+ * JDT LS 初始化超时（10 分钟）
+ * 大型项目（如 Spring Boot）的 JDT LS 启动和索引可能需要较长时间。
+ */
+const INIT_TIMEOUT_MS = 10 * 60 * 1000;
+
 export class JdtLsClient {
   private launcher: JdtLauncher;
   private connectionManager: LspConnectionManager;
@@ -57,32 +63,47 @@ export class JdtLsClient {
   }
 
   /**
-   * 启动 JDT LS 并初始化
+   * 启动 JDT LS 并初始化（带 10 分钟超时保护）
    */
   async start(): Promise<void> {
     if (this.connectionManager.getConnection()) {
       return;
     }
 
-    this.reportProgress('starting', 0, '启动 JDT LS...');
-    
-    // 1. 启动 Java 进程
-    const launchResult = await this.launcher.launch();
-    
-    this.reportProgress('jdt-launching', 30, 'JDT LS 进程已启动');
+    const init = async () => {
+      this.reportProgress('starting', 0, '启动 JDT LS...');
 
-    // 2. 创建 LSP 连接
-    const connection = this.connectionManager.createConnection(launchResult.process);
-    
-    this.reportProgress('initializing', 50, '建立 LSP 连接...');
+      // 1. 启动 Java 进程
+      const launchResult = await this.launcher.launch();
+      this.reportProgress('jdt-launching', 30, 'JDT LS 进程已启动');
 
-    // 3. 初始化
-    await this.connectionManager.initialize(this.options.projectPath);
-    
-    this.initialized = true;
-    this.reportProgress('ready', 100, 'JDT LS 就绪');
-    
-    this.log('JDT LS started successfully');
+      // 2. 创建 LSP 连接
+      const connection = this.connectionManager.createConnection(launchResult.process);
+      this.reportProgress('initializing', 50, '建立 LSP 连接...');
+
+      // 3. 初始化
+      await this.connectionManager.initialize(this.options.projectPath);
+
+      this.initialized = true;
+      this.reportProgress('ready', 100, 'JDT LS 就绪');
+      this.log('JDT LS started successfully');
+    };
+
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`JDT LS initialization timed out after ${INIT_TIMEOUT_MS / 60000}min`)),
+        INIT_TIMEOUT_MS,
+      ),
+    );
+
+    try {
+      await Promise.race([init(), timeout]);
+    } catch (e) {
+      // 超时或出错 → 强制清理，不留孤儿进程
+      this.log('Initialization failed, cleaning up:', (e as any)?.message || e);
+      await this.stop(/* skip graceful shutdown: process may be stuck */ 0);
+      throw e;
+    }
   }
 
   /**
@@ -257,10 +278,11 @@ export class JdtLsClient {
 
   /**
    * 停止 JDT LS
+   * @param gracefulTimeoutMs 优雅关闭等待时间（0 = 直接强杀）
    */
-  async stop(): Promise<void> {
+  async stop(gracefulTimeoutMs: number = 10000): Promise<void> {
     this.log('Stopping JDT LS...');
-    await this.connectionManager.stop();
+    await this.connectionManager.stop(gracefulTimeoutMs);
     this.initialized = false;
     this.openedFiles.clear();
   }

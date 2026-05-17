@@ -7,11 +7,15 @@ import * as path from 'path';
 import { readJsonFile, writeJsonFile, ensureDir } from '../core/utils/fileUtils';
 import { log } from '../core/logger';
 import { JvmConfig, DaemonConfig, DaemonConfigOptions } from '../core/types';
-import { 
+import {
   DEFAULT_JVM_XMS,
   DEFAULT_JVM_XMX,
   DEFAULT_GC_PAUSE_MS,
   DEFAULT_SOFT_REF_LRU_MS_PER_MB,
+  DEFAULT_G1_PERIODIC_GC_INTERVAL_MS,
+  DEFAULT_MAX_HEAP_FREE_RATIO,
+  DEFAULT_MIN_HEAP_FREE_RATIO,
+  DEFAULT_MAX_METASPACE_SIZE,
   CONFIG_DIR_NAME,
   CONFIG_FILE_NAME,
 } from '../core/constants';
@@ -30,6 +34,10 @@ export const DEFAULT_JVM_CONFIG: JvmConfig = {
   maxGCPauseMillis: DEFAULT_GC_PAUSE_MS,
   useStringDeduplication: true,
   softRefLRUPolicyMSPerMB: DEFAULT_SOFT_REF_LRU_MS_PER_MB,
+  g1PeriodicGCIntervalMs: DEFAULT_G1_PERIODIC_GC_INTERVAL_MS,
+  maxHeapFreeRatio: DEFAULT_MAX_HEAP_FREE_RATIO,
+  minHeapFreeRatio: DEFAULT_MIN_HEAP_FREE_RATIO,
+  maxMetaspaceSize: DEFAULT_MAX_METASPACE_SIZE,
   extraArgs: [],
 };
 
@@ -39,7 +47,7 @@ export const DEFAULT_JVM_CONFIG: JvmConfig = {
 export const DEFAULT_DAEMON_CONFIG: DaemonConfigOptions = {
   port: 9876,
   idleTimeoutMinutes: 30,
-  maxProjects: 1,           // 默认单项目模式
+  maxProjects: 3,           // 默认最多 3 个项目
   perProjectMemory: '1g',   // 每项目 1GB
   autoScaling: {
     enabled: true,

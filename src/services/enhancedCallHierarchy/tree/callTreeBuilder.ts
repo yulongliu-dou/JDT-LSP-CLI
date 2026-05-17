@@ -37,9 +37,14 @@ export class CallTreeBuilder {
   ): Promise<MethodNode[]> {
     if (parentDepth >= cursor.maxDepth) return [];
 
-    const calls = cursor.direction === 'outgoing'
-      ? await this.connection.getOutgoingCalls(item)
-      : await this.connection.getIncomingCalls(item);
+    let calls: any[];
+    try {
+      calls = cursor.direction === 'outgoing'
+        ? await this.connection.getOutgoingCalls(item)
+        : await this.connection.getIncomingCalls(item);
+    } catch {
+      return [];
+    }
 
     const results: MethodNode[] = [];
     const parentId = findMethodIdByItem(cursor.visited, item);
@@ -82,9 +87,14 @@ export class CallTreeBuilder {
   ): Promise<void> {
     if (currentDepth >= maxDepth) return;
 
-    const calls = direction === 'outgoing'
-      ? await this.connection.getOutgoingCalls(item)
-      : await this.connection.getIncomingCalls(item);
+    let calls: any[];
+    try {
+      calls = direction === 'outgoing'
+        ? await this.connection.getOutgoingCalls(item)
+        : await this.connection.getIncomingCalls(item);
+    } catch {
+      return;
+    }
 
     const parentId = findMethodIdByItem(visited, item);
 

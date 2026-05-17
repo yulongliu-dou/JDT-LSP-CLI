@@ -34,7 +34,7 @@ describe('MyBatis E2E - SqlSession 核心调用链（Daemon 模式）', () => {
       ]);
 
       const output = parseJSONOutput(result.stdout);
-      
+
       expect(output.success).toBe(true);
       expect(output.data.entry).toBeDefined();
       expect(output.data.entry.name).toContain('selectOne');

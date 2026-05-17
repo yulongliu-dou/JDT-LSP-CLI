@@ -25,6 +25,7 @@ describe('MyBatis E2E - Executor 层次结构（Daemon 模式）', () => {
         '-p', MYBATIS_PROJECT.path,
         'impl', MYBATIS_PROJECT.files.executorInterface,
         '--symbol', 'Executor',
+        '--kind', 'Interface',
         '--json-compact'
       ]);
 
@@ -41,6 +42,7 @@ describe('MyBatis E2E - Executor 层次结构（Daemon 模式）', () => {
         '-p', MYBATIS_PROJECT.path,
         'impl', MYBATIS_PROJECT.files.baseExecutor,
         '--symbol', 'BaseExecutor',
+        '--kind', 'Class',
         '--json-compact'
       ]);
 
@@ -51,11 +53,13 @@ describe('MyBatis E2E - Executor 层次结构（Daemon 模式）', () => {
   });
 
   describe('Executor 方法定义跳转', () => {
-    it('应该定位到 SimpleExecutor 的 query 方法', async () => {
+    it('应该定位到 SimpleExecutor 的 doQuery 方法', async () => {
       const result = await execCLIWithDaemon([
         '-p', MYBATIS_PROJECT.path,
         'def', MYBATIS_PROJECT.files.simpleExecutor,
-        '--method', 'query',
+        '--method', 'doQuery',
+        '--kind', 'Method',
+        '--index', '0',
         '--json-compact'
       ]);
 
@@ -68,6 +72,8 @@ describe('MyBatis E2E - Executor 层次结构（Daemon 模式）', () => {
         '-p', MYBATIS_PROJECT.path,
         'def', MYBATIS_PROJECT.files.cachingExecutor,
         '--method', 'query',
+        '--kind', 'Method',
+        '--index', '1',
         '--json-compact'
       ]);
 
@@ -77,11 +83,13 @@ describe('MyBatis E2E - Executor 层次结构（Daemon 模式）', () => {
   });
 
   describe('Executor 调用链分析', () => {
-    it('应该分析 SimpleExecutor.query 的调用链', async () => {
+    it('应该分析 SimpleExecutor.doQuery 的调用链', async () => {
       const result = await execCLIWithDaemon([
         '-p', MYBATIS_PROJECT.path,
         'ch', MYBATIS_PROJECT.files.simpleExecutor,
-        '--method', 'query',
+        '--method', 'doQuery',
+        '--kind', 'Method',
+        '--index', '0',
         '--incoming',
         '-d', '2',
         '--json-compact'
@@ -96,6 +104,8 @@ describe('MyBatis E2E - Executor 层次结构（Daemon 模式）', () => {
         '-p', MYBATIS_PROJECT.path,
         'ch', MYBATIS_PROJECT.files.baseExecutor,
         '--method', 'doQuery',
+        '--kind', 'Method',
+        '--index', '0',
         '-d', '3',
         '--json-compact'
       ]);

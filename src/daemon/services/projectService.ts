@@ -6,6 +6,14 @@
 
 import * as os from 'os';
 import * as path from 'path';
+
+/**
+ * 路径规范化：resolve + Windows 大小写不敏感
+ */
+function normalizePath(p: string): string {
+  const resolved = path.resolve(p);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
 import { JdtLsClient } from '../../jdtClient';
 import { CLIOptions, InitStage } from '../../core/types';
 import { ProjectLoadEvent } from '../../projectPool';
@@ -27,6 +35,7 @@ const inFlightInitializations = new Map<string, Promise<{ client: JdtLsClient; l
  * @returns 客户端和加载事件信息
  */
 export async function initClient(projectPath: string, options: Partial<CLIOptions> = {}): Promise<{ client: JdtLsClient; loadEvent?: ProjectLoadEvent }> {
+  projectPath = normalizePath(projectPath);
   const projectPool = daemonState.getProjectPool();
   
   // 多项目模式：使用 ProjectPool（内部已自行管理并发）
@@ -34,6 +43,10 @@ export async function initClient(projectPath: string, options: Partial<CLIOption
     daemonState.updateProgress('starting', 0, '开始初始化项目...');
     const result = await projectPool.getClient(projectPath, options);
     daemonState.setLastLoadEvent(result.loadEvent);
+    // 多项目模式下同步全局状态，确保 isClientReady() / getLibraryLocator() 可用
+    daemonState.setClient(result.client);
+    daemonState.setCurrentProject(projectPath);
+    daemonState.setClientReady(true);
     if (result.loadEvent?.type === 'new' || result.loadEvent?.type === 'reloaded') {
       daemonState.updateProgress('ready', 100, '项目就绪', undefined);
     }

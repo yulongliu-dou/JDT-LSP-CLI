@@ -11,6 +11,7 @@ import { parseBody, sendResponse } from '../http/requestHandlers';
 import { initClient } from '../services/projectService';
 import { resolvePosition } from '../services/positionResolver';
 import { diagnoseProjectMismatch } from '../services/diagnostics';
+import * as path from 'path';
 import { CLIResult, InitStage, ProjectLoadState } from '../../core/types';
 import { PACKAGE_VERSION } from '../../core/constants';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
@@ -73,7 +74,14 @@ export async function setupRequestRouter(req: http.IncomingMessage, res: http.Se
       await handleConfig(configBody, res, startTime);
       return;
     }
-    
+
+    // 优雅停止指定项目（带 draining）
+    if (pathname === '/stop-project') {
+      const stopBody = await parseBody(req);
+      await handleStopProject(stopBody, res, startTime);
+      return;
+    }
+
     // 解析请求体
     const body = await parseBody(req);
     const { project, file, line, col, options = {} } = body;
@@ -280,7 +288,23 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
 
   // 确定整体状态
   let overallStatus: 'idle' | 'starting' | 'initializing' | 'indexing' | 'ready' | 'error';
-  if (!currentProject) {
+
+  // 多项目模式：从项目池聚合状态
+  if (projectPool && projectPool.size > 0) {
+    const projectList = projectPool.listProjects();
+    const hasReady = projectList.some((p: { status: string }) => p.status === 'ready');
+    const hasInitializing = projectList.some((p: { status: string }) => p.status === 'initializing');
+    const allError = projectList.every((p: { status: string }) => p.status === 'error');
+    if (allError) {
+      overallStatus = 'error';
+    } else if (hasReady) {
+      overallStatus = 'ready';
+    } else if (hasInitializing) {
+      overallStatus = 'initializing';
+    } else {
+      overallStatus = 'idle';
+    }
+  } else if (!currentProject) {
     overallStatus = 'idle';
   } else if (isReady) {
     overallStatus = 'ready';
@@ -414,8 +438,11 @@ async function handleShutdown(res: http.ServerResponse, startTime: number) {
   
   setTimeout(async () => {
     daemonState.log('Shutdown requested, cleaning up...');
+    const projectPool = daemonState.getProjectPool();
     const client = daemonState.getClient();
-    if (client) {
+    if (projectPool) {
+      await projectPool.shutdown();
+    } else if (client) {
       await client.stop();
     }
     // 删除 PID 文件
@@ -584,14 +611,15 @@ async function handleCallHierarchy(body: any, activeClient: any, startTime: numb
   const { line: posLine, col: posCol } = posResult;
   const maxDepth = body.depth || 5;
   const incoming = body.incoming || false;
-  
+
   // 深度警告提示（不阻拦）
   if (maxDepth > 5) {
     console.warn(`⚠️  Warning: Call chain depth ${maxDepth} is large, may cause performance issues or parsing failures`);
     console.warn(`   Suggestion: Use --depth 3-5 for best results`);
   }
-  
-  const items = await activeClient.prepareCallHierarchy(body.file, posLine, posCol);
+
+  let items: any[];
+  items = await activeClient.prepareCallHierarchy(body.file, posLine, posCol);
   if (!items || items.length === 0) {
     return { entry: null, calls: [], totalMethods: 0 };
   }
@@ -603,16 +631,24 @@ async function handleCallHierarchy(body: any, activeClient: any, startTime: numb
     const key = `${item.uri}#${item.name}#${item.range?.start?.line}`;
     if (visited.has(key) || depth > maxDepth) return;
     visited.add(key);
-    
-    const calls = incoming
-      ? await activeClient.getIncomingCalls(item)
-      : await activeClient.getOutgoingCalls(item);
-    
+
+    let calls: any[];
+    try {
+      calls = incoming
+        ? await activeClient.getIncomingCalls(item)
+        : await activeClient.getOutgoingCalls(item);
+    } catch (e: any) {
+      // JDT LS 在遍历深度调用链时可能遇到内部错误（如非 .java 编译单元），
+      // 此时优雅降级：保留已收集的调用节点，不再继续此分支。
+      daemonState.log(`Call hierarchy collect error at depth ${depth} (${item.name}): ${e.message}`);
+      return;
+    }
+
     // 防御性检查：确保calls是可迭代数组（LSP规范允许返回null）
     if (!calls || !Array.isArray(calls)) {
       return;
     }
-    
+
     for (const call of calls) {
       // SP02：jdt:// 重写为真实 file://；未启用/失败时透传保留原 jdt:// 行为
       const target = await rewriteCallItem(incoming ? call.from : call.to);
@@ -953,8 +989,11 @@ async function handleRelease(body: any, project: string, startTime: number) {
     const released = await projectPool.releaseProject(targetProject);
     return { released, project: targetProject };
   } else {
-    // 单项目模式：如果是当前项目则释放
-    if (currentProject === targetProject) {
+    // 单项目模式：如果是当前项目则释放（Windows 大小写不敏感）
+    const normalizedTarget = process.platform === 'win32'
+      ? path.resolve(targetProject).toLowerCase()
+      : path.resolve(targetProject);
+    if (currentProject === normalizedTarget) {
       const client = daemonState.getClient();
       if (client) {
         await client.stop();
@@ -967,4 +1006,81 @@ async function handleRelease(body: any, project: string, startTime: number) {
       return { released: false, project: targetProject, reason: 'Project not loaded' };
     }
   }
+}
+
+/**
+ * 等待项目 draining 完成（活跃请求归零或超时）
+ */
+async function waitForDrain(
+  pool: { getActiveRequestCount(path: string): number },
+  projectPath: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const active = pool.getActiveRequestCount(projectPath);
+    if (active <= 0) return true;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return false;
+}
+
+/**
+ * 优雅停止指定项目（G3：POST /stop-project）
+ *
+ * 与 release 的区别：默认等待活跃请求完成（draining），
+ * --force 跳过 draining 直接终止。
+ */
+async function handleStopProject(body: any, res: http.ServerResponse, startTime: number) {
+  const targetProject = body.project;
+  const force = body.force === true;
+
+  if (!targetProject) {
+    sendResponse(res, {
+      success: false,
+      error: 'Missing required parameter: project',
+      elapsed: Date.now() - startTime,
+    });
+    return;
+  }
+
+  const projectPool = daemonState.getProjectPool();
+  if (!projectPool) {
+    sendResponse(res, {
+      success: false,
+      error: 'Not in multi-project mode',
+      elapsed: Date.now() - startTime,
+    });
+    return;
+  }
+
+  if (!projectPool.hasProject(targetProject)) {
+    sendResponse(res, {
+      success: false,
+      error: `Project not loaded: ${targetProject}`,
+      elapsed: Date.now() - startTime,
+    });
+    return;
+  }
+
+  if (!force) {
+    projectPool.markDraining(targetProject);
+    const drained = await waitForDrain(projectPool, targetProject, 5000);
+    if (!drained) {
+      projectPool.unmarkDraining(targetProject);
+      sendResponse(res, {
+        success: false,
+        error: 'Drain timeout. Use --force to skip drain.',
+        elapsed: Date.now() - startTime,
+      });
+      return;
+    }
+  }
+
+  const released = await projectPool.releaseProject(targetProject);
+  sendResponse(res, {
+    success: true,
+    data: { released, project: targetProject },
+    elapsed: Date.now() - startTime,
+  });
 }
