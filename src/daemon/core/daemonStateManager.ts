@@ -84,6 +84,7 @@ export function probeDaemonHealth(
           resolve({ isDaemon: false });
         }
       });
+      res.on('error', () => resolve({ isDaemon: false }));
     });
     req.on('error', () => resolve({ isDaemon: false }));
     req.on('timeout', () => { req.destroy(); resolve({ isDaemon: false }); });
@@ -131,13 +132,17 @@ export class DaemonStateManager {
       error,
     };
     this.log(`[Progress] ${stage} (${percent}%): ${message}`);
-    
+
     // 通过 IPC 通知父进程（如果是子进程模式）
     if (process.send) {
-      process.send({
-        type: 'progress',
-        data: this.initProgress,
-      });
+      try {
+        process.send({
+          type: 'progress',
+          data: this.initProgress,
+        });
+      } catch {
+        // IPC 通道已断开，静默忽略
+      }
     }
   }
 

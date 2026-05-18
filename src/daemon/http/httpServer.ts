@@ -12,28 +12,65 @@ import { setupRequestRouter } from '../routes/routeHandlers';
 import { validateProjectPath } from '../../core/utils/daemonValidation';
 
 /**
+ * 安全发送 IPC 消息，通道断开时静默忽略
+ */
+function safeIpcSend(msg: { type: string; data: any }): void {
+  if (!process.send) return;
+  try {
+    process.send(msg);
+  } catch {
+    // IPC 通道已断开（父进程退出/管道损坏），静默忽略
+  }
+}
+
+/**
  * 创建并启动 HTTP 服务器
  */
 export function createHttpServer(
   port: number = DEFAULT_PORT,
   options?: { eagerInit?: boolean; projectPath?: string; jdtlsPath?: string; multiProject?: boolean }
 ): http.Server {
-  // 创建 HTTP 服务器
   const server = http.createServer(handleRequest);
-  
+
+  // 注册 error 事件监听器，防止 listen 失败时未处理错误导致进程崩溃
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`❌ 端口 ${port} 已被占用`);
+      console.error(`💡 请更换端口: jls daemon start --port <other-port>`);
+      console.error(`   或停止占用进程: npx kill-port ${port}`);
+    } else if (err.code === 'EACCES') {
+      console.error(`❌ 无权限绑定端口 ${port}`);
+      console.error(`💡 请使用 1024 以上的端口，或检查是否有其他程序占用了该端口`);
+    } else if (err.code === 'EADDRNOTAVAIL') {
+      console.error(`❌ 地址 127.0.0.1 不可用`);
+    } else {
+      console.error(`❌ HTTP 服务器启动失败: ${err.message} (${err.code || 'unknown'})`);
+    }
+    // 通知父进程启动失败
+    safeIpcSend({
+      type: 'error',
+      data: {
+        error: `HTTP server listen failed: ${err.message}`,
+        code: err.code,
+        port,
+      },
+    });
+    process.exit(1);
+  });
+
   server.listen(port, '127.0.0.1', async () => {
     daemonState.log(`JDT LSP Daemon started on http://127.0.0.1:${port}`);
     daemonState.log(`PID: ${process.pid}`);
     daemonState.log(`Log file: ${LOG_FILE}`);
-    
+
     // 写入 PID 文件（JSON 格式，包含端口、启动时间、版本）
     daemonState.writePidFile(port);
     daemonState.setStartTime(Date.now());
-    
+
     console.log(`JDT LSP Daemon started on port ${port}`);
     console.log(`PID file: ${PID_FILE}`);
     console.log(`Log file: ${LOG_FILE}`);
-    
+
     // 预初始化项目（如果启用）
     if (options?.eagerInit && options?.projectPath) {
       const projectCheck = validateProjectPath(options.projectPath);
@@ -42,15 +79,13 @@ export function createHttpServer(
         if (projectCheck.suggestion) {
           console.error(`💡 ${projectCheck.suggestion}`);
         }
-        if (process.send) {
-          process.send({
-            type: 'error',
-            data: {
-              error: projectCheck.error,
-              projectPath: options.projectPath,
-            },
-          });
-        }
+        safeIpcSend({
+          type: 'error',
+          data: {
+            error: projectCheck.error,
+            projectPath: options.projectPath,
+          },
+        });
       } else {
         if (projectCheck.warnings) {
           for (const w of projectCheck.warnings) {
@@ -61,10 +96,10 @@ export function createHttpServer(
       }
     }
   });
-  
+
   // 优雅关闭
   setupGracefulShutdown(server);
-  
+
   return server;
 }
 
@@ -105,33 +140,27 @@ async function handleEagerInitialization(
     await initClient(projectPath, { jdtlsPath: options.jdtlsPath });
     daemonState.log('Project pre-initialized successfully');
     console.log('Project ready!');
-    
-    // 通过 IPC 通知父进程初始化完成
-    if (process.send) {
-      process.send({
-        type: 'ready',
-        data: {
-          projectPath: options.projectPath,
-          loadTime: daemonState.getLastLoadEvent()?.loadTime,
-          pid: process.pid,
-        },
-      });
-    }
+
+    safeIpcSend({
+      type: 'ready',
+      data: {
+        projectPath: options.projectPath,
+        loadTime: daemonState.getLastLoadEvent()?.loadTime,
+        pid: process.pid,
+      },
+    });
   } catch (error: any) {
     daemonState.log('Eager initialization failed:', error.message);
     console.error('Warning: Eager initialization failed:', error.message);
     console.error('Project will be initialized on first request.');
-    
-    // 通过 IPC 通知父进程初始化失败
-    if (process.send) {
-      process.send({
-        type: 'error',
-        data: {
-          error: error.message,
-          projectPath: options.projectPath,
-        },
-      });
-    }
+
+    safeIpcSend({
+      type: 'error',
+      data: {
+        error: error.message,
+        projectPath: options.projectPath,
+      },
+    });
   }
 }
 

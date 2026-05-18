@@ -34,6 +34,18 @@ import { load as loadDaemonConfig } from './libraryProvider/daemonConfigStore';
 import { validateEnvironment, isPortAvailable, validatePort } from './core/utils/daemonValidation';
 
 /**
+ * 安全发送 IPC 消息，通道断开时静默忽略
+ */
+function safeIpcSend(msg: { type: string; data: any }): void {
+  if (!process.send) return;
+  try {
+    process.send(msg);
+  } catch {
+    // IPC 通道已断开，静默忽略
+  }
+}
+
+/**
  * 将日期格式化为统一的 ISO-like 字符串：YYYY-MM-DD HH:mm:ss
  */
 function formatDateTime(d: Date): string {
@@ -149,7 +161,18 @@ export async function startDaemon(port: number = DEFAULT_PORT, options?: { eager
   }
 
   // 创建并启动 HTTP 服务器
-  createHttpServer(port, options);
+  // 注：server.listen 是异步的，如果绑定失败会触发 server 'error' 事件
+  // (在 httpServer.ts 中已注册 error 处理)，此处 try-catch 仅捕获同步构造错误
+  try {
+    createHttpServer(port, options);
+  } catch (err: any) {
+    console.error(`❌ 无法创建 HTTP 服务器: ${err.message || err}`);
+    safeIpcSend({
+      type: 'error',
+      data: { error: `Failed to create HTTP server: ${err.message || err}` },
+    });
+    process.exit(1);
+  }
 
   // SP05：启动缓存定时清理（30s 后首次，之后每 12h）
   scheduleCacheCleanup();

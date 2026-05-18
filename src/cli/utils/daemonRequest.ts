@@ -56,10 +56,22 @@ export async function sendDaemonRequest(endpoint: string, body: any): Promise<CL
           error: 'Daemon not running. Start it with: jls daemon start',
           elapsed: 0,
         });
+      } else if (e.code === 'ECONNRESET') {
+        resolve({
+          success: false,
+          error: 'Daemon connection reset. The daemon may have crashed. Check with: jls daemon status',
+          elapsed: 0,
+        });
+      } else if (e.code === 'ETIMEDOUT' || e.code === 'ESOCKETTIMEDOUT') {
+        resolve({
+          success: false,
+          error: 'Daemon connection timed out. The daemon may be overloaded or unresponsive.',
+          elapsed: 0,
+        });
       } else {
         resolve({
           success: false,
-          error: `Daemon connection error: ${e.message}`,
+          error: `Daemon connection error: ${e.message} (${e.code || 'unknown'})`,
           elapsed: 0,
         });
       }
