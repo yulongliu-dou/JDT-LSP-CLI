@@ -11,13 +11,39 @@ import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolK
 import { looksLikeJdkSymbol, buildJdkHint } from '../../core/utils/jdkSymbolHint';
 import { validateFindCommand } from '../utils/paramValidator';
 
+// ── Help ──────────────────────────────────────────────────────────────────────
+
+const HELP = `
+Usage: jls find <query> [options]
+       jls f <query> [options]
+
+全局搜索类、方法、字段。
+
+Options:
+  --kind <type>   按符号类型过滤：Class | Method | Field | Interface ...
+  --limit <n>     最大结果数（默认 50）
+  -h, --help      显示帮助
+
+Examples:
+  jls find UserService
+  jls find ArrayList --kind Class
+  jls find process --kind Method --limit 20
+
+On ambiguity:
+  用 --kind 缩小搜索范围。
+  如果无结果且查询看起来像 JDK 类，工具会自动提示。
+`;
+
+// ── Command ───────────────────────────────────────────────────────────────────
+
 export function registerWorkspaceSymbolsCommand(program: Command) {
   program
     .command('find <query>')
     .alias('f')
-    .description('Search symbols across the entire workspace')
-    .option('--kind <type>', 'Filter by symbol kind: Class, Method, Field, Interface...')
-    .option('--limit <n>', 'Maximum number of results', '50')
+    .description('全局搜索类、方法、字段。')
+    .configureHelp({ formatHelp: () => HELP })
+    .option('--kind <type>', '按符号类型过滤：Class, Method, Field, Interface...')
+    .option('--limit <n>', '最大结果数', '50')
     .action(async (query: string, cmdOptions: any) => {
       const opts = program.opts();
 
