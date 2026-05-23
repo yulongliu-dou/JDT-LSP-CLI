@@ -7,6 +7,7 @@ import * as path from 'path';
 import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
+import { validateFileSymbolCommand } from '../utils/paramValidator';
 
 export function registerReferencesCommand(program: Command) {
   let referencesCmd = program
@@ -32,6 +33,14 @@ export function registerReferencesCommand(program: Command) {
   
   referencesCmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
+
+    // 防呆：校验参数合法性
+    const validationError = validateFileSymbolCommand(file, cmdOptions, opts, 'refs');
+    if (validationError) {
+      outputResult(validationError, undefined, opts.jsonCompact, opts.output);
+      return;
+    }
+
     const projectPath = path.resolve(opts.project);
     
     // 解析位置（支持符号模式）

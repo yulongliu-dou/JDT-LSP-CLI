@@ -9,6 +9,7 @@ import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
 import { looksLikeJdkSymbol, buildJdkHint } from '../../core/utils/jdkSymbolHint';
+import { validateFindCommand } from '../utils/paramValidator';
 
 export function registerWorkspaceSymbolsCommand(program: Command) {
   program
@@ -19,6 +20,14 @@ export function registerWorkspaceSymbolsCommand(program: Command) {
     .option('--limit <n>', 'Maximum number of results', '50')
     .action(async (query: string, cmdOptions: any) => {
       const opts = program.opts();
+
+      // 防呆：校验参数格式
+      const validationError = validateFindCommand(cmdOptions);
+      if (validationError) {
+        outputResult(validationError, undefined, opts.jsonCompact, opts.output);
+        return;
+      }
+
       const projectPath = path.resolve(opts.project);
       
       await executeCommand(

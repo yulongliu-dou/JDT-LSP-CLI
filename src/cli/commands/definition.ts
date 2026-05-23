@@ -8,13 +8,14 @@ import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { resolveSymbol, buildSymbolQuery } from '../../symbolResolver';
+import { validateFileSymbolCommand } from '../utils/paramValidator';
 
 export function registerDefinitionCommand(program: Command) {
   let definitionCmd = program
     .command('definition [file]')
     .alias('def')
     .description('Go to definition of a symbol. Use --symbol for auto-positioning.');
-  
+
   // 添加符号定位选项
   const symbolOptions = [
     { flags: '--method <name>', desc: 'Method name to locate (auto-resolve position)' },
@@ -25,13 +26,21 @@ export function registerDefinitionCommand(program: Command) {
     { flags: '--kind <type>', desc: 'Symbol kind: Method, Field, Class, Interface' },
     { flags: '--global', desc: '⚠️ Global search (requires --symbol AND --kind, JDT LS limitation)' },
   ];
-  
+
   for (const opt of symbolOptions) {
     definitionCmd = definitionCmd.option(opt.flags, opt.desc);
   }
-  
+
   definitionCmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
+
+    // 防呆：校验参数合法性
+    const validationError = validateFileSymbolCommand(file, cmdOptions, opts, 'def');
+    if (validationError) {
+      outputResult(validationError, undefined, opts.jsonCompact, opts.output);
+      return;
+    }
+
     const projectPath = path.resolve(opts.project);
     
     // 解析位置（支持符号模式）

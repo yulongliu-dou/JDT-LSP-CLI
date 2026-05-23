@@ -12,6 +12,7 @@ import { getPosition, executeCommand } from './utils/positionResolver';
 import { outputResult } from './utils/outputHandler';
 import { stringToSymbolKind, symbolKindToString } from '../core/utils/symbolKind';
 import { rewriteCallItem } from '../libraryProvider/uriRewriter';
+import { validateCallHierarchyCommand } from './utils/paramValidator';
 
 /**
  * Call Hierarchy 命令实现
@@ -238,8 +239,16 @@ export function registerCallHierarchyCommand(program: Command) {
   
   callHierarchyCmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
+
+    // 防呆：校验参数合法性
+    const validationError = validateCallHierarchyCommand(file, cmdOptions, opts);
+    if (validationError) {
+      outputResult(validationError, undefined, opts.jsonCompact, opts.output);
+      return;
+    }
+
     const projectPath = path.resolve(opts.project);
-    
+
     // 解析位置（支持符号模式）
     const posResult = await getPosition(file, cmdOptions, opts);
     if ('success' in posResult) {

@@ -18,6 +18,8 @@ import { load as loadDaemonConfig } from '../../libraryProvider/daemonConfigStor
 import { cleanStale, cleanAll } from '../../libraryProvider/cache/cacheCleaner';
 import { listDirectDeps } from '../../libraryProvider/resolvers/mavenDependencyResolver';
 import { runDependencySources } from '../../libraryProvider/sources/mvnRunner';
+import { validateCacheStatsCommand, validateCacheCleanCommand, validateCacheWarmCommand } from '../utils/paramValidator';
+import { outputResult } from '../utils/outputHandler';
 
 const KB = 1024;
 const MB = KB * 1024;
@@ -140,6 +142,13 @@ export function registerCache(program: Command): void {
     .description('Show cache statistics')
     .option('--format <fmt>', 'Output format: table|json', 'table')
     .action((cmdOpts) => {
+      const opts = program.opts();
+      const validationError = validateCacheStatsCommand(cmdOpts);
+      if (validationError) {
+        outputResult(validationError, undefined, opts.jsonCompact, opts.output);
+        return;
+      }
+
       const stats = collectStats(getLspCacheRoot());
 
       if (cmdOpts.format === 'json') {
@@ -181,6 +190,13 @@ export function registerCache(program: Command): void {
     .option('--all', 'Remove all cache entries')
     .option('--cache-ttl-days <n>', 'Override TTL days', (v: string) => parseInt(v, 10))
     .action(async (cmdOpts) => {
+      const opts = program.opts();
+      const validationError = validateCacheCleanCommand(cmdOpts);
+      if (validationError) {
+        outputResult(validationError, undefined, opts.jsonCompact, opts.output);
+        return;
+      }
+
       if (cmdOpts.all) {
         await cleanAll();
         console.log('All cache entries removed.');
@@ -206,6 +222,13 @@ export function registerCache(program: Command): void {
     .option('--project <path>', 'Project root path', process.cwd())
     .option('--timeout <ms>', 'Timeout per artifact in ms', '60000')
     .action(async (cmdOpts) => {
+      const opts = program.opts();
+      const validationError = validateCacheWarmCommand(cmdOpts);
+      if (validationError) {
+        outputResult(validationError, undefined, opts.jsonCompact, opts.output);
+        return;
+      }
+
       const projectRoot = path.resolve(cmdOpts.project);
       const deps = await listDirectDeps(projectRoot);
 

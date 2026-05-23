@@ -4,11 +4,11 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import * as fs from 'fs';
 import { executeCommand, createDirectClient } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { symbolKindToString } from '../../core/utils/symbolKind';
+import { validateSymbolsCommand } from '../utils/paramValidator';
 
 export function registerSymbolsCommand(program: Command) {
   program
@@ -20,9 +20,11 @@ export function registerSymbolsCommand(program: Command) {
       const opts = program.opts();
       const filePath = resolveFilePath(file, opts.project);
       const projectPath = path.resolve(opts.project);
-      
-      if (!fs.existsSync(filePath)) {
-        outputResult({ success: false, error: `File not found: ${filePath}`, elapsed: 0 }, undefined, opts.jsonCompact, opts.output);
+
+      // 防呆：校验文件存在性
+      const validationError = validateSymbolsCommand(filePath, { project: opts.project });
+      if (validationError) {
+        outputResult(validationError, undefined, opts.jsonCompact, opts.output);
         return;
       }
       
