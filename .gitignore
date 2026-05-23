@@ -10,3 +10,10 @@ coverage/
 !vendor/*.jar
 # 内置 JDT LS tar.gz（构建产物，npm publish 时包含）
 jdtls/
+# 开发期文档与内部工具（不提交到仓库）
+.claude/
+docs/code-review/
+docs/design/
+docs/superpowers/plans/
+docs/test-results/
+set-default-browser.ps1
