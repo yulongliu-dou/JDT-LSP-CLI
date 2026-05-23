@@ -267,6 +267,124 @@ export function fetchJreAsset(apiUrl: string): Promise<JreAsset> {
   });
 }
 
+interface DownloadState {
+  downloaded: number;
+  total: number;
+  startTime: number;
+  lastUpdateTime: number;
+  lastDownloaded: number;
+}
+
+/**
+ * 渲染下载进度条
+ */
+function renderProgress(state: DownloadState): string {
+  const { downloaded, total } = state;
+
+  if (total === 0) {
+    return `\r  下载中... ${(downloaded / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  const pct = Math.min(100, Math.round((downloaded / total) * 100));
+  const barWidth = 30;
+  const filled = Math.round((pct / 100) * barWidth);
+  const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
+
+  const downloadedMB = (downloaded / 1024 / 1024).toFixed(1);
+  const totalMB = (total / 1024 / 1024).toFixed(1);
+
+  const now = Date.now();
+  const timeDiff = (now - state.lastUpdateTime) / 1000;
+  const byteDiff = downloaded - state.lastDownloaded;
+  const speed = timeDiff > 0 ? (byteDiff / timeDiff) : 0;
+  const speedStr = speed > 1024 * 1024
+    ? `${(speed / 1024 / 1024).toFixed(1)} MB/s`
+    : `${(speed / 1024).toFixed(0)} KB/s`;
+
+  const remaining = speed > 0 ? ((total - downloaded) / speed) : 0;
+  const remainingStr = remaining > 60
+    ? `${Math.ceil(remaining / 60)}m`
+    : `${Math.ceil(remaining)}s`;
+
+  return `\r  ${bar} ${pct}%  ${downloadedMB} MB / ${totalMB} MB · ${speedStr} · 剩余 ${remainingStr}`;
+}
+
+/**
+ * 流式下载文件，实时进度到 stdout
+ */
+function downloadFile(url: string, dest: string, onProgress?: (state: DownloadState) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const { protocol } = new URL(url);
+    const client = protocol === 'https:' ? https : http;
+
+    client.get(url, { timeout: 300000 }, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        const redirectUrl = res.headers.location;
+        if (redirectUrl) {
+          return downloadFile(redirectUrl, dest, onProgress).then(resolve).catch(reject);
+        }
+      }
+
+      if (res.statusCode !== 200) {
+        reject(new Error(`Download failed: HTTP ${res.statusCode}`));
+        return;
+      }
+
+      const total = parseInt(res.headers['content-length'] || '0', 10);
+      const state: DownloadState = {
+        downloaded: 0,
+        total,
+        startTime: Date.now(),
+        lastUpdateTime: Date.now(),
+        lastDownloaded: 0,
+      };
+
+      const fileStream = fs.createWriteStream(dest);
+
+      res.on('data', (chunk: Buffer) => {
+        state.downloaded += chunk.length;
+
+        const now = Date.now();
+        if (now - state.lastUpdateTime >= 200) {
+          if (onProgress) {
+            onProgress(state);
+          } else {
+            process.stdout.write(renderProgress(state));
+          }
+          state.lastUpdateTime = now;
+          state.lastDownloaded = state.downloaded;
+        }
+      });
+
+      res.pipe(fileStream);
+
+      fileStream.on('finish', () => {
+        fileStream.close();
+        if (onProgress) {
+          onProgress({ ...state, downloaded: total || state.downloaded });
+        } else {
+          process.stdout.write(renderProgress({ ...state, downloaded: total || state.downloaded }));
+          process.stdout.write('\n');
+        }
+        resolve();
+      });
+
+      fileStream.on('error', (err) => {
+        fs.unlink(dest, () => {});
+        reject(err);
+      });
+
+      res.on('error', (err) => {
+        fs.unlink(dest, () => {});
+        reject(err);
+      });
+    }).on('error', (err) => {
+      fs.unlink(dest, () => {});
+      reject(err);
+    });
+  });
+}
+
 // 单例实例
 let instance: EmbeddedJreManager | null = null;
 
