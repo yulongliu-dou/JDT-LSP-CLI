@@ -10,6 +10,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as http from 'http';
+import * as https from 'https';
 import { execSync } from 'child_process';
 import { ensureDir } from '../../core/utils/fileUtils';
 import { log } from '../../core/logger';
@@ -85,6 +87,27 @@ export class EmbeddedJreManager {
     // - 支持 Windows/macOS/Linux
     // - 解压到存储目录
     throw new Error('Not implemented');
+  }
+
+  /**
+   * 探测网络是否可达 Adoptium 服务
+   */
+  private probeNetwork(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const req = https.request(
+        `${ADOPTIUM_API_BASE}/v3/assets/latest/${JRE_TARGET_VERSION}/hotspot?image_type=jre&project=jdk&vendor=eclipse&os=linux&arch=x64`,
+        { method: 'HEAD', timeout: NETWORK_PROBE_TIMEOUT_MS },
+        (res) => {
+          resolve(res.statusCode !== undefined && res.statusCode < 500);
+        }
+      );
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.end();
+    });
   }
 
   /**
@@ -183,6 +206,65 @@ export function detectJavaVersion(javaExe: string): number | null {
     }
     return null;
   }
+}
+
+interface JreAsset {
+  downloadUrl: string;
+  checksum: string;
+  size: number;
+  version: string;
+}
+
+/**
+ * 构建 Adoptium API 请求 URL
+ */
+export function buildAdoptiumUrl(osName: string, archName: string): string {
+  const params = new URLSearchParams({
+    image_type: 'jre',
+    project: 'jdk',
+    vendor: 'eclipse',
+    os: osName,
+    arch: archName,
+  });
+  return `${ADOPTIUM_API_BASE}/v3/assets/latest/${JRE_TARGET_VERSION}/hotspot?${params}`;
+}
+
+/**
+ * 从 Adoptium API 获取 JRE 下载信息
+ */
+export function fetchJreAsset(apiUrl: string): Promise<JreAsset> {
+  return new Promise((resolve, reject) => {
+    const { protocol } = new URL(apiUrl);
+    const client = protocol === 'https:' ? https : http;
+
+    client.get(apiUrl, { timeout: 15000 }, (res) => {
+      let body = '';
+      res.on('data', (chunk: string) => { body += chunk; });
+      res.on('end', () => {
+        try {
+          const assets = JSON.parse(body);
+          if (!Array.isArray(assets) || assets.length === 0) {
+            reject(new Error('No JRE asset found in API response'));
+            return;
+          }
+          const binary = assets[0]?.binary;
+          if (!binary?.package?.link) {
+            reject(new Error('Invalid API response: missing download link'));
+            return;
+          }
+          resolve({
+            downloadUrl: binary.package.link,
+            checksum: binary.package.checksum || '',
+            size: binary.package.size || 0,
+            version: assets[0].version?.semver || '21.0.0',
+          });
+        } catch (e: any) {
+          reject(new Error(`Failed to parse Adoptium API response: ${e.message}`));
+        }
+      });
+      res.on('error', reject);
+    }).on('error', reject);
+  });
 }
 
 // 单例实例
