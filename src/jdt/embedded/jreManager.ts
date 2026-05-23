@@ -1,30 +1,31 @@
 /**
- * 内嵌 JRE 管理器（未来功能）
- * 
- * TODO:
- * - 下载 JRE
- * - 解压 JRE
- * - 管理多个 JRE 版本
- * - 自动选择最佳 JRE
+ * 内嵌 JRE 管理器
+ *
+ * 负责:
+ * - 自动下载 Adoptium JRE 21
+ * - 管理本地 JRE 缓存
+ * - 降级到系统已有 JRE
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { ensureDir } from '../../core/utils/fileUtils';
 import { log } from '../../core/logger';
+import { JRE_STORAGE_DIR, ADOPTIUM_API_BASE, JRE_TARGET_VERSION, NETWORK_PROBE_TIMEOUT_MS, MIN_DISK_SPACE_MB, getAdoptiumPlatform } from './jreConstants';
 
 export interface JreInfo {
   version: string;
   path: string;
   javaExe: string;
+  source: 'embedded' | 'redhat' | 'system';
 }
 
 export class EmbeddedJreManager {
   private readonly jreStorageDir: string;
 
   constructor() {
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-    this.jreStorageDir = path.join(homeDir, '.jdt-lsp-cli', 'jre');
+    this.jreStorageDir = JRE_STORAGE_DIR;
     ensureDir(this.jreStorageDir);
   }
 
@@ -70,6 +71,7 @@ export class EmbeddedJreManager {
       version,
       path: jrePath,
       javaExe,
+      source: 'embedded' as const,
     };
   }
 
@@ -127,6 +129,7 @@ export class EmbeddedJreManager {
       version,
       path: jrePath,
       javaExe,
+      source: 'embedded' as const,
     };
   }
 
