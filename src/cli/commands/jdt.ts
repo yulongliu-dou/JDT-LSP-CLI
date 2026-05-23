@@ -1,14 +1,37 @@
 import { Command } from 'commander';
 import { getJdtlsManager } from '../../jdt/embedded/jdtlsManager';
 
+// ── Help ──────────────────────────────────────────────────────────────────────
+
+const JDT_STATUS_HELP = `
+Usage: jls jdt status
+
+显示内嵌 JDT LS 的状态（来源、版本、路径、就绪状态）。
+`;
+
+const JDT_UPDATE_HELP = `
+Usage: jls jdt update
+
+从内置包重新解压安装 JDT LS。
+`;
+
+const JDT_REMOVE_HELP = `
+Usage: jls jdt remove
+
+删除内嵌 JDT LS，后续回退使用 VS Code 扩展或手动下载。
+`;
+
+// ── Command ───────────────────────────────────────────────────────────────────
+
 export function registerJdt(program: Command): void {
   const jdtCmd = program
     .command('jdt')
-    .description('Manage the embedded JDT LS');
+    .description('管理内嵌 JDT LS。');
 
   jdtCmd
     .command('status')
-    .description('Show JDT LS status')
+    .description('显示 JDT LS 状态。')
+    .configureHelp({ formatHelp: () => JDT_STATUS_HELP })
     .action(async () => {
       const manager = getJdtlsManager();
       const status = await manager.getStatus();
@@ -28,7 +51,8 @@ export function registerJdt(program: Command): void {
 
   jdtCmd
     .command('update')
-    .description('Re-extract JDT LS from bundled package')
+    .description('重新解压安装 JDT LS。')
+    .configureHelp({ formatHelp: () => JDT_UPDATE_HELP })
     .action(async () => {
       const manager = getJdtlsManager();
       try {
@@ -42,7 +66,8 @@ export function registerJdt(program: Command): void {
 
   jdtCmd
     .command('remove')
-    .description('Remove embedded JDT LS, fall back to other sources')
+    .description('删除内嵌 JDT LS。')
+    .configureHelp({ formatHelp: () => JDT_REMOVE_HELP })
     .action(async () => {
       const manager = getJdtlsManager();
       await manager.remove();

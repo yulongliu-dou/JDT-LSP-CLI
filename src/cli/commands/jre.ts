@@ -1,14 +1,45 @@
 import { Command } from 'commander';
 import { getJreManager } from '../../jdt/embedded/jreManager';
 
+// ── Help ──────────────────────────────────────────────────────────────────────
+
+const JRE_STATUS_HELP = `
+Usage: jls jre status
+
+显示内嵌 JRE 的状态（来源、版本、路径、就绪状态）。
+`;
+
+const JRE_DOWNLOAD_HELP = `
+Usage: jls jre download [options]
+
+下载或重新下载内嵌 Adoptium JRE 21。
+
+Options:
+  --choose     交互选择下载源
+  -h, --help   显示帮助
+
+Examples:
+  jls jre download
+  jls jre download --choose
+`;
+
+const JRE_REMOVE_HELP = `
+Usage: jls jre remove
+
+删除内嵌 JRE，后续回退使用系统 Java。
+`;
+
+// ── Command ───────────────────────────────────────────────────────────────────
+
 export function registerJre(program: Command): void {
   const jreCmd = program
     .command('jre')
-    .description('Manage the embedded JRE environment');
+    .description('管理内嵌 JRE 环境。');
 
   jreCmd
     .command('status')
-    .description('Show JRE status')
+    .description('显示 JRE 状态。')
+    .configureHelp({ formatHelp: () => JRE_STATUS_HELP })
     .action(async () => {
       const manager = getJreManager();
       const status = await manager.getStatus();
@@ -28,7 +59,8 @@ export function registerJre(program: Command): void {
 
   jreCmd
     .command('download')
-    .description('Download or re-download the embedded Adoptium JRE 21')
+    .description('下载或重新下载内嵌 Adoptium JRE 21。')
+    .configureHelp({ formatHelp: () => JRE_DOWNLOAD_HELP })
     .option('--choose', '交互选择下载源')
     .action(async (options) => {
       const manager = getJreManager();
@@ -44,7 +76,8 @@ export function registerJre(program: Command): void {
 
   jreCmd
     .command('remove')
-    .description('Remove embedded JRE, fall back to system Java')
+    .description('删除内嵌 JRE。')
+    .configureHelp({ formatHelp: () => JRE_REMOVE_HELP })
     .action(async () => {
       const manager = getJreManager();
       await manager.remove();
