@@ -28,11 +28,11 @@ jls --version
 ### 基本使用
 
 ```bash
-# 启动守护进程（推荐）
-jls daemon start --eager --init-project /path/to/java-project
-
-# 搜索类
+# 直接运行业务命令 — 首次自动完成 JRE 下载 + JDT LS 初始化
 jls -p /path/to/project find SqlSession --kind Class
+
+# 启动守护进程（推荐，后续命令毫秒级响应）
+jls daemon start --eager --init-project /path/to/java-project
 
 # 获取文件符号
 jls sym src/main/java/org/example/MyClass.java --flat
@@ -40,6 +40,70 @@ jls sym src/main/java/org/example/MyClass.java --flat
 # 分析调用链
 jls ch src/main/java/org/example/Service.java --method processOrder -d 3
 ```
+
+## 环境初始化
+
+`jdt-lsp-cli` 需要两项运行时依赖：**JRE 21** 和 **JDT LS**。安装 npm 包后，首次运行业务命令时会自动完成两者的初始化，无需手动干预。
+
+### JRE 自动初始化
+
+首次运行时，系统自动检测 JRE 是否就绪。如未找到，则并发探测多个下载源并启动**多源竞速下载**——所有可达源同时下载，取最先完成的安装，其余自动取消并清理。
+
+| 下载源 | 说明 |
+|--------|------|
+| TUNA 清华镜像 | `mirrors.tuna.tsinghua.edu.cn/Adoptium` |
+| USTC 中科大镜像 | `mirrors.ustc.edu.cn/adoptium` |
+| Adoptium 官方 | `api.adoptium.net` |
+| GitHub Releases | `github.com/adoptium/temurin21-binaries/releases` |
+
+**降级策略**（按优先级）：
+
+1. 内嵌 JRE 缓存 (`~/.jdt-lsp-cli/jre/<version>/`) — 已下载则直接使用
+2. 多源并发竞速下载 — 自动安装最快的镜像版本
+3. 系统 JRE — 回退到 `JAVA_HOME` 或 `PATH` 中的 `java`
+
+示例输出：
+
+```
+🔍 正在检测 Java 运行环境...
+   未找到内嵌 JRE，正在并发探测可用下载源
+   平台: windows x64
+
+   ✅ TUNA 清华镜像          · 21.0.11_10     · 489ms
+   ✅ USTC 中科大镜像         · 21.0.9_10      · 238ms
+   ❌ GitHub Releases    · GitHub Releases 超时 (8s)
+   ✅ Adoptium Official  · 21.0.11_10.0.LTS · 3621ms
+
+⬇ 并发下载 (3 个源): TUNA 清华镜像, USTC 中科大镜像, Adoptium Official
+   来源: USTC 中科大镜像
+   ██████████████████████████████ 100%
+   ✓ SHA256 校验通过
+   ✓ 解压完成: ~/.jdt-lsp-cli/jre/21.0.9_10 (Java 21)
+```
+
+### JDT LS 自动初始化
+
+JDT LS 不再从 Eclipse 远程下载，改为使用 npm 包内置的 `tar.gz` 压缩包。
+
+- **postinstall 阶段**：`npm install` 完成后自动执行 `scripts/extract-jdtls.js`，将 `jdtls/jdt-language-server-*.tar.gz` 解压到 `~/.jdt-lsp-cli/jdtls/<version>/`
+- **首次运行阶段**：`JdtLauncher.launch()` 检查缓存是否有效，如已解压则直接使用
+
+**降级策略**（按优先级）：
+
+1. `--jdtls-path` 用户指定路径
+2. 内嵌 JDT LS 缓存 (`~/.jdt-lsp-cli/jdtls/<version>/`)
+3. VS Code / Qoder 的 Red Hat Java 扩展内置 server
+
+### 手动管理命令
+
+| 命令 | 功能 |
+|------|------|
+| `jls jre status` | 查看 JRE 版本、路径、状态 |
+| `jls jre download` | 重新下载 JRE（含交互选择源 `--choose`） |
+| `jls jre remove` | 删除内嵌 JRE，回退到系统 Java |
+| `jls jdt status` | 查看 JDT LS 版本、路径、状态 |
+| `jls jdt update` | 从内置包重新解压安装 JDT LS |
+| `jls jdt remove` | 删除内嵌 JDT LS，回退到其他来源 |
 
 ## 文档导航
 
@@ -63,6 +127,8 @@ jls ch src/main/java/org/example/Service.java --method processOrder -d 3
 | 命令 | 功能 | 文档 |
 |------|------|------|
 | `daemon` | 守护进程管理 | [📖](docs/commands/daemon-守护进程管理.md) |
+| `jre` | 内嵌 JRE 管理 | 见 [环境初始化](#环境初始化) |
+| `jdt` | 内嵌 JDT LS 管理 | 见 [环境初始化](#环境初始化) |
 | `config` | 配置管理 | [📖](docs/commands/config-配置管理.md) |
 | `cache` | 缓存与源码定位 | [📖](docs/commands/library-缓存与源码定位.md) |
 
@@ -172,11 +238,11 @@ jls def MyClass.java --method myMethod --json-compact
 ## 典型工作流
 
 ```bash
-# 1. 启动守护进程
-jls daemon start --eager --init-project /path/to/project --wait
-
-# 2. 搜索目标类
+# 1. 首次命令 — 自动完成 JRE 下载 + JDT LS 初始化，然后执行搜索
 jls find UserService --kind Class
+
+# 2. 启动守护进程（后续命令毫秒级响应）
+jls daemon start --eager --init-project /path/to/project --wait
 
 # 3. 查看类结构
 jls sym src/main/java/com/example/UserService.java --flat
@@ -196,14 +262,14 @@ jls refs src/main/java/com/example/UserService.java --method processOrder
 
 ## 性能对比
 
-| 模式 | 首次命令 | 后续命令 |
-|------|----------|----------|
-| 守护进程模式 | 30-60s | **5-500ms** |
-| 直接模式 | 30-60s | 30-60s |
+| 模式 | 首次命令（含 JRE 下载） | 首次命令（有缓存） | 后续命令 |
+|------|--------------------------|-------------------|----------|
+| 守护进程模式 | ~35s | 30-60s | **5-500ms** |
+| 直接模式 | ~35s | 30-60s | 30-60s |
 
 ## 测试
 
-本项目包含完整的测试套件（130+ 用例），覆盖单元测试、集成测试和 E2E 测试：
+本项目包含完整的测试套件（297 用例），覆盖单元测试、集成测试和 E2E 测试：
 
 ```bash
 # 运行单元测试（快速，~0.5秒）
@@ -235,10 +301,15 @@ jdt-lsp-cli/
 ├── docs/                      # 文档目录
 │   ├── commands/              # 各命令的详细文档
 │   └── 全局选项.md          # 全局选项文档
+├── jdtls/                     # 内置 JDT LS tar.gz 压缩包（构建时打入 npm 包）
+├── scripts/                   # 构建与安装脚本
+│   ├── extract-jdtls.js       # postinstall：解压内置 JDT LS
+│   └── download-jdtls.js      # 构建：下载 JDT LS tar.gz
 ├── src/                       # 源代码
 │   ├── cli/                   # CLI 命令实现
 │   ├── core/                  # 核心功能
 │   ├── jdt/                   # JDT LS 集成
+│   │   └── embedded/          # 内嵌运行时管理 (JRE + JDT LS)
 │   └── services/              # 服务层
 ├── test/                      # 测试套件
 │   ├── unit/                  # 单元测试

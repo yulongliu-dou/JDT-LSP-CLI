@@ -8,3 +8,5 @@ test-reports
 coverage/
 # vendor/ 目录保留 jar，不忽略
 !vendor/*.jar
+# 内置 JDT LS tar.gz（构建产物，npm publish 时包含）
+jdtls/

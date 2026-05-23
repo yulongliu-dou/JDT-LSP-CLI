@@ -16,6 +16,8 @@ import { registerTypeDefinitionCommand } from './commands/typeDefinition';
 import { registerImplementationsCommand } from './commands/implementations';
 import { registerHoverCommand } from './commands/hover';
 import { registerCache } from './commands/cache';
+import { registerJre } from './commands/jre';
+import { registerJdt } from './commands/jdt';
 
 /**
  * 注册所有 CLI 命令
@@ -23,10 +25,16 @@ import { registerCache } from './commands/cache';
 export function registerAllCommands(program: Command): void {
   // 注册 daemon 命令
   registerDaemon(program);
-  
+
   // 注册 config 命令
   registerConfig(program);
-  
+
+  // 注册 jre 命令
+  registerJre(program);
+
+  // 注册 jdt 命令
+  registerJdt(program);
+
   // 注册 LSP 命令
   registerCallHierarchyCommand(program);
   registerDefinitionCommand(program);

@@ -15,6 +15,8 @@ import * as os from 'os';
 import { JvmConfig, CLIOptions } from '../core/types';
 import { createSpawnOptions } from '../core/utils/processUtils';
 import { loadConfig, DEFAULT_JVM_CONFIG } from './configLoader';
+import { getJreManager } from './embedded/jreManager';
+import { getJdtlsManager } from './embedded/jdtlsManager';
 
 export interface JdtLaunchResult {
   process: ChildProcess;
@@ -27,6 +29,7 @@ export class JdtLauncher {
   private javaExecutable = 'java';
   private jvmConfig: JvmConfig;
   private options: CLIOptions;
+  private jreInitPromise: Promise<void> | null = null;
 
   constructor(options: CLIOptions, jvmConfig?: Partial<JvmConfig>) {
     this.options = {
@@ -107,46 +110,52 @@ export class JdtLauncher {
 
   /**
    * 查找 JDT LS 路径
+   * 优先级: --jdtls-path > 内嵌 ~/.jdt-lsp-cli/jdtls/<version>/ > VS Code 扩展 > 错误
    */
   findJdtLsPath(): string {
-    // 1. 使用用户指定的路径
+    // 1. 用户指定路径
     if (this.options.jdtlsPath && fs.existsSync(this.options.jdtlsPath)) {
       return this.options.jdtlsPath;
     }
 
-    // 2. 检查常见的安装位置
-    const possiblePaths = [
-      // VS Code Red Hat Java extension
+    // 2. 内嵌 JDT LS
+    try {
+      const jdtlsManager = getJdtlsManager();
+      const cached = jdtlsManager.getCachedJdtls();
+      if (cached) {
+        this.log('Using embedded JDT LS:', cached.path);
+        return cached.path;
+      }
+    } catch { /* 降级 */ }
+
+    // 3. VS Code / Qoder 扩展
+    const extBases = [
       path.join(os.homedir(), '.vscode', 'extensions'),
       path.join(os.homedir(), '.vscode-server', 'extensions'),
-      // Qoder (VS Code based IDE)
       path.join(os.homedir(), '.qoder', 'extensions'),
-      // 环境变量
-      process.env.JDTLS_HOME,
-      // 常见安装路径
-      '/usr/share/java/jdtls',
-      '/opt/jdtls',
-    ].filter(Boolean) as string[];
+    ];
 
-    for (const basePath of possiblePaths) {
+    for (const basePath of extBases) {
       if (!fs.existsSync(basePath)) continue;
-
-      // 查找 redhat.java 扩展
-      const dirs = fs.readdirSync(basePath);
-      const javaExtDir = dirs.find(d => d.startsWith('redhat.java-'));
-      if (javaExtDir) {
-        const extPath = path.join(basePath, javaExtDir);
-        const jdtlsPath = path.join(extPath, 'server');
-        if (fs.existsSync(jdtlsPath)) {
-          // 检查扩展是否自带 Java Runtime
-          this.findBundledJava(extPath);
-          return jdtlsPath;
+      try {
+        const dirs = fs.readdirSync(basePath);
+        const javaExtDir = dirs.find(d => d.startsWith('redhat.java-'));
+        if (javaExtDir) {
+          const serverPath = path.join(basePath, javaExtDir, 'server');
+          if (fs.existsSync(serverPath)) {
+            this.log('Found VS Code JDT LS:', serverPath);
+            console.log('检测到 VS Code Java 扩展中的 JDT LS，复用中...');
+            return serverPath;
+          }
         }
-      }
+      } catch { /* continue */ }
     }
 
+    // 4. 都不行
     throw new Error(
-      'Cannot find eclipse.jdt.ls. Please specify --jdtls-path or install Red Hat Java extension in VS Code'
+      'Cannot find eclipse.jdt.ls.\n\n' +
+      '请运行 `jls jdt update` 重新安装内嵌 JDT LS，\n' +
+      '或使用 `--jdtls-path` 指定路径。\n'
     );
   }
 
@@ -224,9 +233,48 @@ export class JdtLauncher {
   }
 
   /**
+   * 初始化 JRE（确保有可用 Java，在 launch 前调用）
+   */
+  private async initJre(): Promise<void> {
+    const jreManager = getJreManager();
+    const jreInfo = await jreManager.ensure();
+    this.javaExecutable = jreInfo.javaExe;
+    this.log('Using Java:', this.javaExecutable, `(source: ${jreInfo.source})`);
+  }
+
+  /**
+   * 初始化 JDT LS（确保有可用 JDT LS，在 launch 前调用）
+   */
+  private async initJdtls(): Promise<void> {
+    if (this.options.jdtlsPath) {
+      this.log('Using user-specified JDT LS path:', this.options.jdtlsPath);
+      return;
+    }
+
+    const jdtlsManager = getJdtlsManager();
+    try {
+      const jdtlsInfo = await jdtlsManager.ensure();
+      this.options.jdtlsPath = jdtlsInfo.path;
+      this.log('JDT LS ready:', jdtlsInfo.path, `(source: ${jdtlsInfo.source})`);
+    } catch (err: any) {
+      console.error('JDT LS 初始化失败:', err.message);
+      throw err;
+    }
+  }
+
+  /**
    * 启动 JDT LS 进程
    */
   async launch(): Promise<JdtLaunchResult> {
+    // 确保 JRE 就绪
+    if (!this.jreInitPromise) {
+      this.jreInitPromise = this.initJre();
+    }
+    await this.jreInitPromise;
+
+    // 确保 JDT LS 就绪
+    await this.initJdtls();
+
     const jdtlsPath = this.findJdtLsPath();
     const launcherJar = this.findLauncherJar(jdtlsPath);
     const configDir = this.getConfigDir(jdtlsPath);
