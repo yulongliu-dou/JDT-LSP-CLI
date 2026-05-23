@@ -32,6 +32,7 @@ import { AutoScaler } from './daemon/services/autoScaler';
 import { cleanStale } from './libraryProvider/cache/cacheCleaner';
 import { load as loadDaemonConfig } from './libraryProvider/daemonConfigStore';
 import { validateEnvironment, isPortAvailable, validatePort } from './core/utils/daemonValidation';
+import { getJreManager } from './jdt/embedded/jreManager';
 
 /**
  * 安全发送 IPC 消息，通道断开时静默忽略
@@ -57,6 +58,13 @@ function formatDateTime(d: Date): string {
  * 启动守护进程
  */
 export async function startDaemon(port: number = DEFAULT_PORT, options?: { eagerInit?: boolean; projectPath?: string; jdtlsPath?: string; multiProject?: boolean }): Promise<void> {
+  // 0. 确保 JRE 已就绪（在环境预检前，供子进程使用）
+  const jreManager = getJreManager();
+  const jreInfo = await jreManager.ensure();
+  if (!process.env.JAVA_HOME) {
+    process.env.JAVA_HOME = jreInfo.path;
+  }
+
   // 第2层：环境预检（JAVA_HOME、目录权限、内存）
   const envCheck = validateEnvironment(PID_FILE, LOG_FILE);
   if (!envCheck.valid) {

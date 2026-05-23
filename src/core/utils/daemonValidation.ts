@@ -155,20 +155,20 @@ export function validateEnvironment(pidFile: string, logFile: string): Validatio
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  // 1. JAVA_HOME 检查
+  // 1. JAVA_HOME 检查（降级为警告，非致命错误）
   const javaHome = process.env.JAVA_HOME;
   if (!javaHome) {
-    errors.push('JAVA_HOME 环境变量未设置，JDT LS 无法启动');
+    warnings.push('JAVA_HOME 环境变量未设置，将尝试使用内嵌 JRE 或系统 PATH 上的 Java');
   } else {
     const javaHomeResolved = path.resolve(javaHome);
     if (!fs.existsSync(javaHomeResolved)) {
-      errors.push(`JAVA_HOME 指向的目录不存在: ${javaHomeResolved}`);
+      warnings.push(`JAVA_HOME 指向的目录不存在: ${javaHomeResolved}`);
     } else {
       const javaExe = process.platform === 'win32'
         ? path.join(javaHomeResolved, 'bin', 'java.exe')
         : path.join(javaHomeResolved, 'bin', 'java');
       if (!fs.existsSync(javaExe)) {
-        errors.push(`JAVA_HOME 下未找到 java 可执行文件: ${javaExe}`);
+        warnings.push(`JAVA_HOME 下未找到 java 可执行文件: ${javaExe}`);
       }
     }
   }
