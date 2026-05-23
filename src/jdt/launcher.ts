@@ -15,6 +15,7 @@ import * as os from 'os';
 import { JvmConfig, CLIOptions } from '../core/types';
 import { createSpawnOptions } from '../core/utils/processUtils';
 import { loadConfig, DEFAULT_JVM_CONFIG } from './configLoader';
+import { getJreManager } from './embedded/jreManager';
 
 export interface JdtLaunchResult {
   process: ChildProcess;
@@ -27,6 +28,7 @@ export class JdtLauncher {
   private javaExecutable = 'java';
   private jvmConfig: JvmConfig;
   private options: CLIOptions;
+  private jreInitPromise: Promise<void> | null = null;
 
   constructor(options: CLIOptions, jvmConfig?: Partial<JvmConfig>) {
     this.options = {
@@ -138,8 +140,6 @@ export class JdtLauncher {
         const extPath = path.join(basePath, javaExtDir);
         const jdtlsPath = path.join(extPath, 'server');
         if (fs.existsSync(jdtlsPath)) {
-          // 检查扩展是否自带 Java Runtime
-          this.findBundledJava(extPath);
           return jdtlsPath;
         }
       }
@@ -224,9 +224,25 @@ export class JdtLauncher {
   }
 
   /**
+   * 初始化 JRE（确保有可用 Java，在 launch 前调用）
+   */
+  private async initJre(): Promise<void> {
+    const jreManager = getJreManager();
+    const jreInfo = await jreManager.ensure();
+    this.javaExecutable = jreInfo.javaExe;
+    this.log('Using Java:', this.javaExecutable, `(source: ${jreInfo.source})`);
+  }
+
+  /**
    * 启动 JDT LS 进程
    */
   async launch(): Promise<JdtLaunchResult> {
+    // 确保 JRE 就绪
+    if (!this.jreInitPromise) {
+      this.jreInitPromise = this.initJre();
+    }
+    await this.jreInitPromise;
+
     const jdtlsPath = this.findJdtLsPath();
     const launcherJar = this.findLauncherJar(jdtlsPath);
     const configDir = this.getConfigDir(jdtlsPath);
