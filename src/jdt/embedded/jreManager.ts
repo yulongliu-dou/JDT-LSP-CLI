@@ -10,6 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execSync } from 'child_process';
 import { ensureDir } from '../../core/utils/fileUtils';
 import { log } from '../../core/logger';
 import { JRE_STORAGE_DIR, ADOPTIUM_API_BASE, JRE_TARGET_VERSION, NETWORK_PROBE_TIMEOUT_MS, MIN_DISK_SPACE_MB, getAdoptiumPlatform } from './jreConstants';
@@ -139,6 +140,48 @@ export class EmbeddedJreManager {
   async cleanup(keepVersions: string[]): Promise<void> {
     // TODO: 实现清理逻辑
     log('JRE cleanup not implemented yet');
+  }
+}
+
+/**
+ * 从 java -version 输出中提取主版本号
+ */
+export function parseJavaVersion(output: string): number | null {
+  const match = output.match(/version\s+"([^"]+)"/);
+  if (!match) return null;
+
+  const version = match[1];
+  // 处理 "1.8.0_392" 格式 → 8
+  if (version.startsWith('1.')) {
+    const parts = version.split('.');
+    if (parts.length >= 2) {
+      return parseInt(parts[1], 10) || null;
+    }
+  }
+
+  // 处理 "21.0.5" 格式 → 21
+  const parts = version.split('.');
+  return parseInt(parts[0], 10) || null;
+}
+
+/**
+ * 通过执行 java -version 获取版本号
+ */
+export function detectJavaVersion(javaExe: string): number | null {
+  try {
+    const output = execSync(`"${javaExe}" -version`, {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 10000,
+    });
+    return parseJavaVersion(output);
+  } catch (err: any) {
+    // java -version 输出到 stderr, execSync 会抛异常但 stderr 中有内容
+    const stderr = err.stderr || err.stdout || '';
+    if (stderr) {
+      return parseJavaVersion(stderr);
+    }
+    return null;
   }
 }
 
