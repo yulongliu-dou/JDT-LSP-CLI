@@ -8,9 +8,15 @@ export const JRE_STORAGE_DIR = path.join(
 );
 
 export const ADOPTIUM_API_BASE = 'https://api.adoptium.net';
+export const ADOPTIUM_API_ASSETS_URL = `${ADOPTIUM_API_BASE}/v3/assets/latest/21/hotspot`;
+export const GITHUB_API_RELEASES_URL = 'https://api.github.com/repos/adoptium/temurin21-binaries/releases/latest';
+export const USTC_MIRROR_BASE = 'https://mirrors.ustc.edu.cn/adoptium';
+export const TUNA_MIRROR_BASE = 'https://mirrors.tuna.tsinghua.edu.cn/Adoptium';
 export const JRE_TARGET_VERSION = 21;
-export const NETWORK_PROBE_TIMEOUT_MS = 3000;
-export const MIN_DISK_SPACE_MB = 200;
+export const PROBE_TIMEOUT_MS = 8000;
+export const ADOPTIUM_PROBE_TIMEOUT_MS = 5000;
+export const DOWNLOAD_RETRY_MAX = 3;
+export const DOWNLOAD_RETRY_BASE_MS = 1000;
 
 /** 平台 → Adoptium API 参数映射 */
 export function getAdoptiumPlatform(): { os: string; arch: string; ext: string } {

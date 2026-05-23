@@ -29,7 +29,8 @@ export function registerJre(program: Command): void {
   jreCmd
     .command('download')
     .description('Download or re-download the embedded Adoptium JRE 21')
-    .action(async () => {
+    .option('--choose', '交互选择下载源')
+    .action(async (options) => {
       const manager = getJreManager();
 
       try {
@@ -37,7 +38,7 @@ export function registerJre(program: Command): void {
         console.log('已清理旧版本 JRE');
       } catch {}
 
-      const jre = await manager.ensure();
+      const jre = await manager.ensure(options.choose);
       console.log(`JRE ${jre.version} 就绪`);
     });
 
