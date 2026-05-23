@@ -10,22 +10,7 @@ import { JdtLsClient } from '../../jdtClient';
 import { symbolKindToString } from '../../core/utils/symbolKind';
 import { validateSymbolsCommand } from '../utils/paramValidator';
 
-// ── Help ──────────────────────────────────────────────────────────────────────
-
-const HELP = `
-Usage: jls symbols <file> [options]
-       jls sym <file> [options]
-
-列出文件中的所有符号（类、方法、字段等）。
-
-Options:
-  --flat       扁平化输出（去掉层次结构）
-  -h, --help   显示帮助
-
-Examples:
-  jls sym src/main/java/com/example/Service.java
-  jls sym src/main/java/com/example/Service.java --flat
-`;
+import { SYMBOLS_HELP } from './help/symbolsHelp';
 
 // ── Command ───────────────────────────────────────────────────────────────────
 
@@ -34,7 +19,7 @@ export function registerSymbolsCommand(program: Command) {
     .command('symbols <file>')
     .alias('sym')
     .description('列出文件中的所有符号。')
-    .configureHelp({ formatHelp: () => HELP })
+    .configureHelp({ formatHelp: () => SYMBOLS_HELP })
     .option('--flat', '扁平化输出')
     .action(async (file: string, cmdOptions: any) => {
       const opts = program.opts();
