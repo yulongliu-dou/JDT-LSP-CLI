@@ -1,4 +1,6 @@
-import { Command } from 'commander';
+import { Command, Help } from 'commander';
+// 恢复 commander 默认 help 输出（不被 root 的 configureHelp 覆盖）
+const defaultFormatHelp = (cmd: Command, helper: Help) => new Help().formatHelp(cmd, helper);
 import { getJreManager } from '../../jdt/embedded/jreManager';
 
 // ── Help ──────────────────────────────────────────────────────────────────────
@@ -34,7 +36,8 @@ Usage: jls jre remove
 export function registerJre(program: Command): void {
   const jreCmd = program
     .command('jre')
-    .description('管理内嵌 JRE 环境。');
+    .description('管理内嵌 JRE 环境。')
+    .configureHelp({ formatHelp: defaultFormatHelp });
 
   jreCmd
     .command('status')

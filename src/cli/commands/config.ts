@@ -8,7 +8,9 @@
  * - 显示默认 JVM 配置
  */
 
-import { Command } from 'commander';
+import { Command, Help } from 'commander';
+// 恢复 commander 默认 help 输出（不被 root 的 configureHelp 覆盖）
+const defaultFormatHelp = (cmd: Command, helper: Help) => new Help().formatHelp(cmd, helper);
 import * as fs from 'fs';
 import { loadConfig, generateConfigTemplate, CONFIG_FILE, DEFAULT_JVM_CONFIG } from '../../jdtClient';
 
@@ -54,7 +56,8 @@ Usage: jls config defaults
 export function registerConfig(program: Command): void {
   const configCmd = program
     .command('config')
-    .description('管理 JDT LSP CLI 配置。');
+    .description('管理 JDT LSP CLI 配置。')
+    .configureHelp({ formatHelp: defaultFormatHelp });
 
   // config init
   configCmd

@@ -1,4 +1,6 @@
-import { Command } from 'commander';
+import { Command, Help } from 'commander';
+// 恢复 commander 默认 help 输出（不被 root 的 configureHelp 覆盖）
+const defaultFormatHelp = (cmd: Command, helper: Help) => new Help().formatHelp(cmd, helper);
 import { getJdtlsManager } from '../../jdt/embedded/jdtlsManager';
 
 // ── Help ──────────────────────────────────────────────────────────────────────
@@ -26,7 +28,8 @@ Usage: jls jdt remove
 export function registerJdt(program: Command): void {
   const jdtCmd = program
     .command('jdt')
-    .description('管理内嵌 JDT LS。');
+    .description('管理内嵌 JDT LS。')
+    .configureHelp({ formatHelp: defaultFormatHelp });
 
   jdtCmd
     .command('status')

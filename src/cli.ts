@@ -68,8 +68,3 @@ if (opts.sourceDownloadMode || opts.decompiler || opts.cacheTtlDays || !opts.lib
     saveDaemonConfig(partial as any);
   }
 }
-
-// 如果没有提供命令，显示帮助
-if (process.argv.length <= 2) {
-  program.help();
-}

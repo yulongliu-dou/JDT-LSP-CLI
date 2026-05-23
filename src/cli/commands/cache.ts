@@ -9,7 +9,9 @@
  * 参见：[SP04 子计划 Task 4.6](file:///e:/LSP_Scripy/jdt-lsp-cli/.qoder/plans/jar-class-locator/SP04-源码获取与CLI配置_d4e5f6a7.md)
  */
 
-import { Command } from 'commander';
+import { Command, Help } from 'commander';
+// 恢复 commander 默认 help 输出（不被 root 的 configureHelp 覆盖）
+const defaultFormatHelp = (cmd: Command, helper: Help) => new Help().formatHelp(cmd, helper);
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -184,7 +186,8 @@ function formatTs(ts: number | null): string {
 export function registerCache(program: Command): void {
   const cacheCmd = program
     .command('cache')
-    .description('管理源码缓存和 Jar 解析。');
+    .description('管理源码缓存和 Jar 解析。')
+    .configureHelp({ formatHelp: defaultFormatHelp });
 
   // cache stats
   cacheCmd

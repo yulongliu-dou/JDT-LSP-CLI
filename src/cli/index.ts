@@ -21,7 +21,7 @@ import { registerJdt } from './commands/jdt';
 
 // ── Help ──────────────────────────────────────────────────────────────────────
 
-const ROOT_HELP = `
+export const ROOT_HELP = `
 Usage: jls <command> [options]
 
 基于 Eclipse JDT Language Server 的 Java 代码分析 CLI 工具。
