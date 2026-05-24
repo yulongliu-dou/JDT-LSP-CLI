@@ -15,11 +15,11 @@ import { validateProjectPath } from '../../core/utils/daemonValidation';
  * 安全发送 IPC 消息，通道断开时静默忽略
  */
 function safeIpcSend(msg: { type: string; data: any }): void {
-  if (!process.send) return;
+  if (!process.send || !process.connected) return;
   try {
     process.send(msg);
   } catch {
-    // IPC 通道已断开（父进程退出/管道损坏），静默忽略
+    // 极端竞态下通道恰好在 send 前断开，静默忽略
   }
 }
 
