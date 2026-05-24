@@ -557,8 +557,8 @@ export const COMPACT_FIELDS: CompactFieldConfig = {
   definition: ['uri', 'range.start.line', 'range.start.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   references: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   refs: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
-  symbols: ['name', 'kind', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character'],
-  sym: ['name', 'kind', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character'],  // 别名支持
+  symbols: ['name', 'kind', 'detail', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'selectionRange.start.line', 'selectionRange.start.character', 'parent'],
+  sym: ['name', 'kind', 'detail', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'selectionRange.start.line', 'selectionRange.start.character', 'parent'],  // 别名支持
   callHierarchy: ['entry', 'calls', 'totalMethods', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   hover: ['contents'],
   implementations: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
