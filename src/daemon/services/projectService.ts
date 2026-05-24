@@ -43,9 +43,11 @@ export async function initClient(projectPath: string, options: Partial<CLIOption
   if (projectPool) {
     daemonState.updateProgress('starting', 0, '开始初始化项目...');
     const result = await projectPool.getClient(projectPath, options);
-    daemonState.updateProgress('starting', 40, '等待项目构建索引完成...');
-    await waitForBuildImport(projectPath);
     daemonState.setLastLoadEvent(result.loadEvent);
+    if (result.loadEvent?.type !== 'reused') {
+      daemonState.updateProgress('starting', 40, '等待项目构建索引完成...');
+      await waitForBuildImport(projectPath);
+    }
     // 多项目模式下同步全局状态，确保 isClientReady() / getLibraryLocator() 可用
     daemonState.setClient(result.client);
     daemonState.setCurrentProject(projectPath);
