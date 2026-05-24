@@ -679,20 +679,21 @@ export async function analyzeFieldLifecycle(
 // ========== 二期：callHierarchy --lifecycle 字段流分析 ==========
 
 /**
- * 从方法签名 detail 中解析参数名→类型名映射
+ * 从方法签名源码行解析参数名→类型名映射
  *
- * detail 格式示例:
- *   "OrderVO dtoToVo(OrderDTO dto)"    → { dto: "OrderDTO" }
- *   "void process(OrderEntity entity, boolean flag)" → { entity: "OrderEntity", flag: "boolean" }
- *   "void setStatus(Integer status)"     → { status: "Integer" }
+ * 源码行格式示例:
+ *   "    public static OrderDTO entityToDto(OrderEntity entity) {"
+ *   → { entity: "OrderEntity" }
+ *   "    public void process(OrderEntity entity, boolean flag) {"
+ *   → { entity: "OrderEntity" }
  */
-function parseParameterTypes(detail: string): Map<string, string> {
+function parseParameterTypes(sigLine: string): Map<string, string> {
   const map = new Map<string, string>();
-  const parenStart = detail.indexOf('(');
-  const parenEnd = detail.lastIndexOf(')');
+  const parenStart = sigLine.indexOf('(');
+  const parenEnd = sigLine.lastIndexOf(')');
   if (parenStart < 0 || parenEnd < 0) return map;
 
-  const paramsStr = detail.substring(parenStart + 1, parenEnd).trim();
+  const paramsStr = sigLine.substring(parenStart + 1, parenEnd).trim();
   if (!paramsStr) return map;
 
   for (const param of paramsStr.split(',')) {
@@ -756,9 +757,23 @@ export function analyzeMethodFieldFlow(
   methodEndLine: number,
   methodDetail: string
 ): FieldFlowResult {
-  const paramTypes = parseParameterTypes(methodDetail);
+  // 从 methodStartLine 开始前向扫描，找包含 '(' 和 ')' 的真正签名行
+  // 因为 LSP range 可能包含 Javadoc 注释，需排除注释行
+  let sigLine = '';
+  let sigLineIndex = methodStartLine;
+  for (let i = methodStartLine; i <= methodEndLine && i < sourceLines.length; i++) {
+    const line = sourceLines[i];
+    const trimmed = line.trim();
+    if (trimmed.startsWith('*') || trimmed.startsWith('//') || trimmed.startsWith('/*')) continue;
+    if (line.includes('(') && line.includes(')')) {
+      sigLine = line;
+      sigLineIndex = i;
+      break;
+    }
+  }
+  const paramTypes = parseParameterTypes(sigLine);
 
-  const bodyStartLine = methodStartLine + 1;
+  const bodyStartLine = sigLineIndex + 1;
   const bodyLines: string[] = [];
   for (let i = bodyStartLine; i <= methodEndLine && i < sourceLines.length; i++) {
     bodyLines.push(sourceLines[i]);
