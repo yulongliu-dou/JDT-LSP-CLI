@@ -6,7 +6,7 @@
  */
 
 import * as fs from 'fs';
-import { FieldAnnotation, AnnotationGroup, EnhancedReference, ReferenceContext, ReferenceImpact, Location, AccessType, ViaType, DocumentSymbol } from '../core/types';
+import { FieldAnnotation, AnnotationGroup, EnhancedReference, ReferenceContext, ReferenceImpact, Location, AccessType, ViaType, DocumentSymbol, LifecycleSummary, LifecycleResult, LifecycleHints, PropagationTarget, EnumMapping, DtoChainInfo, ConditionalPathSummary, SameNameFieldHint } from '../core/types';
 
 function detectLombokAnnotations(sourceLines: string[], className: string): FieldAnnotation[] {
   const annotations: FieldAnnotation[] = [];
@@ -265,4 +265,404 @@ export function enhanceReference(
     context,
     impact,
   };
+}
+
+// ========== 生命周期分析主引擎 ==========
+
+export interface LspClient {
+  getReferences(filePath: string, line: number, col: number, includeDecl: boolean): Promise<Location[]>;
+  getDocumentSymbols(filePath: string): Promise<DocumentSymbol[]>;
+  getDocumentHighlight(filePath: string, line: number, col: number): Promise<any[]>;
+  getHover(filePath: string, line: number, col: number): Promise<any>;
+}
+
+function walkJavaFiles(dir: string, callback: (filePath: string) => void): void {
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = dir + '/' + entry.name;
+      if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'target') {
+        walkJavaFiles(fullPath, callback);
+      } else if (entry.isFile() && entry.name.endsWith('.java')) {
+        callback(fullPath);
+      }
+    }
+  } catch { /* skip unreadable directories */ }
+}
+
+function discoverSameNameFields(
+  fieldName: string,
+  currentClass: string,
+  projectPath: string
+): PropagationTarget[] {
+  const targets: PropagationTarget[] = [];
+  try {
+    walkJavaFiles(projectPath, (filePath) => {
+      if (filePath.includes(currentClass.replace(/\./g, '/'))) return;
+      const lines = readSourceLines(filePath);
+      for (const line of lines) {
+        const fm = new RegExp(
+          `\\b(private|protected|public)\\s+\\S+\\s+${fieldName}\\b\\s*[;=]`
+        ).exec(line);
+        if (fm) {
+          const className = findEnclosingClass(lines, `file:///${filePath.replace(/\\/g, '/')}`);
+          const typeMatch = line.match(/\b(private|protected|public)\s+(\S+)\s+\w+/);
+          targets.push({
+            class: className,
+            field: fieldName,
+            type: typeMatch ? typeMatch[2] : 'unknown',
+          });
+          break;
+        }
+      }
+    });
+  } catch { /* traversal failure is non-blocking */ }
+  return targets;
+}
+
+function detectDtoChain(
+  sourcePath: string,
+  fieldName: string,
+  propagationTargets: PropagationTarget[]
+): DtoChainInfo {
+  const chains: Array<{ path: string; methods: string[] }> = [];
+  try {
+    walkJavaFiles(sourcePath, (filePath) => {
+      const lines = readSourceLines(filePath);
+      const capitalized = fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
+      const getSetPattern = new RegExp(
+        `\\.(get|is)${capitalized}\\(\\).*\\.set${capitalized}\\(`
+      );
+      for (const line of lines) {
+        const methodMatch = line.match(
+          /\b(?:public|private|protected)\s+(?:\w+\s+)*(\w+)\s*\(/
+        );
+        if (getSetPattern.test(line) && methodMatch) {
+          chains.push({
+            path: 'detected via get->set copy pattern',
+            methods: [methodMatch[1]],
+          });
+          break;
+        }
+      }
+    });
+  } catch { /* detection failure is non-blocking */ }
+  return { chains };
+}
+
+function detectConditionalPaths(
+  sourcePath: string,
+  fieldName: string
+): ConditionalPathSummary[] {
+  const summaries: ConditionalPathSummary[] = [];
+  try {
+    walkJavaFiles(sourcePath, (filePath) => {
+      const lines = readSourceLines(filePath);
+      let inConditional = false;
+      let currentCondition = '';
+      let assignments: Array<{ condition: string; assignment: string }> = [];
+      let currentMethod = '';
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        const mm = line.match(/\b(public|private|protected)\s+\S+\s+(\w+)\s*\(/);
+        if (mm) {
+          if (inConditional && assignments.length > 0) {
+            summaries.push({
+              method: currentMethod,
+              branches: assignments.length,
+              details: assignments,
+            });
+          }
+          currentMethod = mm[2];
+          inConditional = false;
+          assignments = [];
+        }
+
+        const ifm = line.match(/^\s*\}?\s*else\s+if\s*\((.+?)\)\s*\{?/);
+        if (ifm) { inConditional = true; currentCondition = `else if(${ifm[1]})`; continue; }
+        const elsem = /^\s*\}\s*else\s*\{?/.test(line);
+        if (elsem) { inConditional = true; currentCondition = 'else'; continue; }
+        const ifMatch = line.match(/^\s*if\s*\((.+?)\)\s*\{?/);
+        if (ifMatch) { inConditional = true; currentCondition = `if(${ifMatch[1]})`; continue; }
+
+        if (inConditional && new RegExp(`\\b${fieldName}\\s*=|\\.set\\w*${fieldName}\\w*\\(`).test(line)) {
+          assignments.push({ condition: currentCondition, assignment: line });
+        }
+
+        if (inConditional && /^\s*\}$/.test(line)) {
+          inConditional = false;
+        }
+      }
+    });
+  } catch { /* detection failure is non-blocking */ }
+  return summaries;
+}
+
+function flattenSymbols(symbols: DocumentSymbol[]): DocumentSymbol[] {
+  const result: DocumentSymbol[] = [];
+  for (const sym of symbols) {
+    result.push(sym);
+    if (sym.children) result.push(...flattenSymbols(sym.children));
+  }
+  return result;
+}
+
+function isMethodSymbol(sym: DocumentSymbol): boolean {
+  const k: any = sym.kind;
+  return k === 'Method' || k === 'Constructor' || k === 6 || k === 9;
+}
+
+function isEnumType(typeName: string): boolean {
+  return /^[A-Z][a-zA-Z]*Status$|^[A-Z][a-zA-Z]*Type$|^[A-Z][a-zA-Z]*Enum$/.test(typeName);
+}
+
+function buildHints(
+  targets: PropagationTarget[],
+  refs: EnhancedReference[],
+  projectPath: string,
+  fieldName: string
+): LifecycleHints {
+  let detectedLibraries: string[] = [];
+  try {
+    const pomPath = projectPath + '/pom.xml';
+    if (fs.existsSync(pomPath)) {
+      const pom = fs.readFileSync(pomPath, 'utf-8');
+      if (pom.includes('spring-beans')) detectedLibraries.push('spring-beans');
+      if (pom.includes('mapstruct')) detectedLibraries.push('mapstruct');
+      if (pom.includes('hibernate')) detectedLibraries.push('hibernate');
+    }
+  } catch { /* ignore */ }
+
+  const sameNameFields: SameNameFieldHint[] = [];
+  const suspected = new Set<string>();
+  for (const ref of refs) {
+    const line = ref.sourceLine;
+    const capitalized = fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
+    if (new RegExp(`\\.get${capitalized}\\(\\).*\\.set${capitalized}\\(`).test(line)) {
+      const className = ref.context.enclosingClass;
+      if (!suspected.has(className)) {
+        suspected.add(className);
+        sameNameFields.push({
+          class: className,
+          field: fieldName,
+          confidence: 'high',
+          reason: `get->set copy pattern: ${line}`,
+        });
+      }
+    }
+  }
+
+  return {
+    propagationConfidence: targets.length > 0 ? 'partial' : 'none',
+    sameNameFields,
+    ...(detectedLibraries.length > 0 ? {
+      reflectionRisk: {
+        detectedLibraries,
+        suspectedPatterns: ['BeanUtils.copyProperties', 'MapStruct mapping'],
+        advice: `detected ${detectedLibraries.join(', ')}; possible implicit copy. Use jls refs --lifecycle --symbol ${fieldName} <targetClass> to verify per-class`,
+      },
+    } : {}),
+    unreachableViaJdtLs: [
+      {
+        concern: 'JSON deserialization entry',
+        detail: 'Jackson @JsonProperty runtime reflection calls are invisible to static analysis',
+        agentAdvice: 'use runtime logs or HTTP request body to confirm JSON deserialization path',
+      },
+      {
+        concern: 'DB ORM field mapping',
+        detail: '@Column/@TableField runtime ORM reflection assignments are invisible to static analysis',
+        agentAdvice: 'use SQL logs to confirm insert/update/select column read/write operations',
+      },
+    ],
+  };
+}
+
+export async function analyzeFieldLifecycle(
+  fieldName: string,
+  fieldType: string,
+  containingClass: string,
+  declaringFilePath: string,
+  declaringLine: number,
+  declaringCol: number,
+  projectPath: string,
+  client: LspClient,
+  includeDeclaration: boolean = true
+): Promise<LifecycleResult> {
+  const rawRefs = await client.getReferences(declaringFilePath, declaringLine, declaringCol, includeDeclaration);
+
+  const documentSymbolsCache = new Map<string, DocumentSymbol[]>();
+  const sourceLinesCache = new Map<string, string[]>();
+
+  try {
+    const syms = await client.getDocumentSymbols(declaringFilePath);
+    documentSymbolsCache.set(declaringFilePath, syms);
+  } catch { /* non-blocking */ }
+
+  const declLines = readSourceLines(declaringFilePath);
+  sourceLinesCache.set(declaringFilePath, declLines);
+
+  const declLine = declLines[declaringLine - 1]?.trim() || '';
+  const annotations = extractAnnotations(declLines, declLine, fieldName, containingClass);
+
+  // discover getter/setter methods from documentSymbols
+  const capitalizedName = fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
+  const getterName = `get${capitalizedName}`;
+  const setterName = `set${capitalizedName}`;
+  const isGetterName = `is${capitalizedName}`;
+
+  let getterRefs: Location[] = [];
+  let setterRefs: Location[] = [];
+
+  const symbols = documentSymbolsCache.get(declaringFilePath);
+  if (symbols) {
+    const flatSymbols = flattenSymbols(symbols);
+    const getterSym = flatSymbols.find(
+      s => (s.name === getterName || s.name === isGetterName) && isMethodSymbol(s)
+    );
+    const setterSym = flatSymbols.find(
+      s => s.name === setterName && isMethodSymbol(s)
+    );
+
+    if (getterSym) {
+      try {
+        getterRefs = await client.getReferences(
+          declaringFilePath,
+          getterSym.selectionRange.start.line + 1,
+          getterSym.selectionRange.start.character + 1,
+          false
+        );
+      } catch { /* non-blocking */ }
+    }
+    if (setterSym) {
+      try {
+        setterRefs = await client.getReferences(
+          declaringFilePath,
+          setterSym.selectionRange.start.line + 1,
+          setterSym.selectionRange.start.character + 1,
+          false
+        );
+      } catch { /* non-blocking */ }
+    }
+  }
+
+  // preload symbols for getter/setter reference files
+  for (const ref of [...getterRefs, ...setterRefs]) {
+    const refFilePath = ref.uri.replace('file://', '').replace(/^\/([A-Za-z]:)/, '$1');
+    if (!documentSymbolsCache.has(refFilePath)) {
+      try {
+        const syms = await client.getDocumentSymbols(refFilePath);
+        documentSymbolsCache.set(refFilePath, syms);
+      } catch { /* non-blocking */ }
+    }
+  }
+
+  // enhance and deduplicate
+  const enhancedRefs: EnhancedReference[] = [];
+  const seen = new Set<string>();
+
+  function dedupKey(loc: Location): string {
+    return `${loc.uri}:${loc.range.start.line}:${loc.range.start.character}`;
+  }
+
+  for (const ref of rawRefs) {
+    const key = dedupKey(ref);
+    if (!seen.has(key)) {
+      seen.add(key);
+      const enhanced = enhanceReference(ref, fieldName, documentSymbolsCache, sourceLinesCache);
+      enhanced.via = enhanced.via === 'unknown' ? 'direct' : enhanced.via;
+      enhancedRefs.push(enhanced);
+    }
+  }
+
+  for (const ref of getterRefs) {
+    const key = dedupKey(ref);
+    if (!seen.has(key)) {
+      seen.add(key);
+      const enhanced = enhanceReference(ref, fieldName, documentSymbolsCache, sourceLinesCache);
+      enhanced.via = 'getter';
+      enhanced.targetMethod = getterName;
+      enhancedRefs.push(enhanced);
+    }
+  }
+
+  for (const ref of setterRefs) {
+    const key = dedupKey(ref);
+    if (!seen.has(key)) {
+      seen.add(key);
+      const enhanced = enhanceReference(ref, fieldName, documentSymbolsCache, sourceLinesCache);
+      enhanced.via = 'setter';
+      enhanced.targetMethod = setterName;
+      enhancedRefs.push(enhanced);
+    }
+  }
+
+  // build stats
+  const accessStats = { read: 0, write: 0 };
+  const viaStats = { direct: 0, getter: 0, setter: 0 };
+  for (const ref of enhancedRefs) {
+    if (ref.accessType === 'read' || ref.accessType === 'readWrite') accessStats.read++;
+    if (ref.accessType === 'write' || ref.accessType === 'readWrite') accessStats.write++;
+    if (ref.via === 'direct' || ref.via === 'unknown') viaStats.direct++;
+    else if (ref.via === 'getter') viaStats.getter++;
+    else if (ref.via === 'setter') viaStats.setter++;
+  }
+
+  const propagationTargets = discoverSameNameFields(fieldName, containingClass, projectPath);
+
+  // enum mapping detection
+  let enumMapping: EnumMapping | undefined;
+  if (fieldType && isEnumType(fieldType)) {
+    walkJavaFiles(projectPath, (filePath) => {
+      const lines = readSourceLines(filePath);
+      const joined = lines.join('\n');
+      const enumMatch = joined.match(
+        new RegExp(`enum\\s+${fieldType}\\s*\\{([^}]+)\\}`, 's')
+      );
+      if (enumMatch) {
+        const body = enumMatch[1];
+        const constPattern = /(\w+)\s*\(\s*([^,]+?)\s*,\s*"([^"]+)"\s*\)/g;
+        const constants: EnumMapping['constants'] = [];
+        let cm;
+        while ((cm = constPattern.exec(body)) !== null) {
+          constants.push({
+            name: cm[1],
+            value: cm[2].trim(),
+            description: cm[3],
+          });
+        }
+        const resolverMethods: string[] = [];
+        for (const line of lines) {
+          if (line.includes('fromValue') || line.includes('from') && line.includes('static')) {
+            const rmm = line.match(/public\s+static\s+\S+\s+(\w+)\s*\(/);
+            if (rmm) resolverMethods.push(rmm[1]);
+          }
+        }
+        enumMapping = {
+          enumClass: filePath.replace(/\\/g, '/'),
+          constants,
+          resolverMethods,
+        };
+      }
+    });
+  }
+
+  const dtoChain = detectDtoChain(projectPath, fieldName, propagationTargets);
+  const conditionalPaths = detectConditionalPaths(projectPath, fieldName);
+
+  const summary: LifecycleSummary = {
+    field: { name: fieldName, type: fieldType, containingClass },
+    annotations,
+    accessStats,
+    viaStats,
+    propagationTargets,
+    ...(enumMapping ? { enumMapping } : {}),
+    ...(dtoChain.chains.length > 0 ? { dtoChain } : {}),
+    ...(conditionalPaths.length > 0 ? { conditionalPaths } : {}),
+  };
+
+  const hints = buildHints(propagationTargets, enhancedRefs, projectPath, fieldName);
+
+  return { summary, references: enhancedRefs, hints };
 }
