@@ -9,6 +9,7 @@ import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { resolveSymbol, buildSymbolQuery } from '../../symbolResolver';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
+import { initDirectModeRewriter, rewriteDirectLocations } from '../utils/directModeRewriter';
 
 import { DEFINITION_HELP } from './help/definitionHelp';
 
@@ -73,6 +74,7 @@ export function registerDefinitionCommand(program: Command) {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
+          await initDirectModeRewriter(client, projectPath);
           let finalLine = parseInt(resolvedLine);
           let finalCol = parseInt(resolvedCol);
           // 对 global 模式下解析到的外部文件，用文档符号重新精确定位
@@ -95,7 +97,9 @@ export function registerDefinitionCommand(program: Command) {
               // 文档符号定位失败，继续使用原位置
             }
           }
-          return await client.getDefinition(filePath, finalLine, finalCol);
+          const defs = await client.getDefinition(filePath, finalLine, finalCol);
+          const arr = Array.isArray(defs) ? defs : defs ? [defs] : [];
+          return rewriteDirectLocations(arr);
         } finally {
           if (client) await client.stop();
         }
