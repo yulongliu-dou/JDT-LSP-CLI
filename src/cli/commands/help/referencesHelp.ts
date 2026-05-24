@@ -18,18 +18,29 @@ Options:
 
 Examples:
   jls refs Service.java --method processOrder
-  jls refs Service.java --symbol status --lifecycle
+  jls refs Service.java --symbol status --kind Field --lifecycle
   jls refs Service.java --method process --no-declaration
+  jls refs Service.java --symbol status --kind Field
 
 Lifecycle mode (--lifecycle):
-  Output: { summary, references[], hints }
-  - summary.annotations: Lombok/JSON/DB annotation mapping
-  - summary.propagationTargets: same-name fields in workspace
-  - summary.dtoChain: cross-module DTO transformation chains
+  输出结构: { summary, references[], hints, count }
+  - summary.field: 字段基础信息 (name, type, containingClass)
+  - summary.annotations: Lombok(@Data/@Getter/@Setter) / JSON(@JsonProperty/@SerializedName) / DB(@Column/@TableField/@Table) 三类注解映射
+  - summary.accessStats: read/write 计数
+  - summary.viaStats: direct/getter/setter 引用方式统计
+  - summary.propagationTargets: 工作区内同名字段类
+  - summary.enumMapping: 枚举值→描述映射表 (字段类型为枚举时)
+  - summary.dtoChain: 跨模块 DTO 转换链路
+  - summary.conditionalPaths: 条件分支下多路径复制摘要
+  - references[].sourceLine: 引用所在行源码
   - references[].accessType: read | write | readWrite | unknown
   - references[].via: direct | getter | setter | reflection | unknown
-  - references[].context: enclosingMethod + branch
-  - hints: reasoning clues for uncertain scenarios (confidence + nextAction)
+  - references[].context.enclosingMethod / .enclosingClass / .branch: 引用上下文
+  - references[].impact.value / .valueSource: 赋值影响
+  - hints.propagationConfidence: full | partial | none
+  - hints.sameNameFields[].confidence: high | medium | low (+ nextAction)
+  - hints.reflectionRisk: 检测到的反射复制风险库
+  - hints.unreachableViaJdtLs: 静态分析不可达的运行时路径
 
 On ambiguity:
   多个符号匹配时，使用 --index 0/1/2 选择。

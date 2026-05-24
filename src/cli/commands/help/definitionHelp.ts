@@ -18,7 +18,11 @@ Examples:
   jls def Service.java --method processOrder
   jls def Service.java --method process --signature "(String, int)"
   jls def Service.java --method process --index 1
+  jls def Service.java --symbol status --kind Field
   jls def --global --symbol ArrayList --kind Class
+
+Field mode:
+  字段定义默认附带 annotations 信息 (Lombok/JSON/DB 三类注解)，无需额外参数。
 
 On ambiguity:
   多个符号匹配时，使用 --index 0/1/2 选择。
