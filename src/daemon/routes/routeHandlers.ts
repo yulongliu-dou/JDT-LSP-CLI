@@ -926,12 +926,45 @@ async function handleCallHierarchy(body: any, activeClient: any, startTime: numb
         callee: incoming ? item.name : target.name,
         location: { uri: target.uri, range: target.range },
         kind: symbolKindToString(target.kind),
+        detail: target.detail,
       });
       await collectCalls(target, depth + 1);
     }
   }
   
   await collectCalls(items[0], 0);
+
+  if (body.lifecycle) {
+    const { analyzeMethodFieldFlow, readSourceLines } = await import('../../services/fieldLifecycleService');
+    const sourceLinesCache = new Map<string, string[]>();
+    for (const call of allCalls) {
+      try {
+        const callUri = call.location.uri;
+        if (!callUri || !callUri.startsWith('file://')) continue;
+        const callFilePath = callUri.replace('file://', '').replace(/^\/([A-Za-z]:)/, '$1');
+        if (!sourceLinesCache.has(callFilePath)) {
+          sourceLinesCache.set(callFilePath, readSourceLines(callFilePath));
+        }
+        const lines = sourceLinesCache.get(callFilePath)!;
+        const detail = call.detail || '';
+        call.fieldFlow = analyzeMethodFieldFlow(
+          lines,
+          call.location.range.start.line,
+          call.location.range.end.line,
+          detail
+        );
+        delete call.detail;
+      } catch {
+        call.fieldFlow = { reads: [], writes: [] };
+        delete call.detail;
+      }
+    }
+  } else {
+    for (const call of allCalls) {
+      delete call.detail;
+    }
+  }
+
   return {
     entry: { name: items[0].name, kind: symbolKindToString(items[0].kind), detail: items[0].detail, uri: items[0].uri, range: items[0].range },
     calls: allCalls,
