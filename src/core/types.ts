@@ -568,8 +568,8 @@ export const COMPACT_FIELDS: CompactFieldConfig = {
   workspaceSymbols: ['name', 'kind', 'location.uri', 'location.range.start.line'],
   find: ['name', 'kind', 'location.uri', 'location.range.start.line'],  // 别名支持
   f: ['name', 'kind', 'location.uri', 'location.range.start.line'],  // 别名支持
-  diagnostics: ['severity', 'message', 'code', 'range.start.line', 'range.start.character'],
-  diag: ['severity', 'message', 'code', 'range.start.line', 'range.start.character'],
+  diagnostics: ['severity', 'message', 'code', 'source', 'tags', 'range.start.line', 'range.start.character'],
+  diag: ['severity', 'message', 'code', 'source', 'tags', 'range.start.line', 'range.start.character'],
   rename: ['file', 'range.start.line', 'range.start.character', 'newText'],  // TODO: edits 为嵌套数组，compact 暂按 change 级别处理
   semanticTokens: ['line', 'startChar', 'length', 'tokenType', 'tokenModifiers'],
   semtok: ['line', 'startChar', 'length', 'tokenType', 'tokenModifiers'],
