@@ -683,21 +683,21 @@ async function handleRename(body: any, activeClient: any, startTime: number, res
   const changes: any[] = [];
   if (workspaceEdit?.changes) {
     for (const [uri, edits] of Object.entries(workspaceEdit.changes) as [string, any[]][]) {
-      changes.push({ file: uri, edits: edits.map((e: any) => ({ range: e.range, newText: e.newText })) });
+      for (const e of edits) {
+        changes.push({ file: uri, range: e.range, newText: e.newText });
+      }
     }
   }
   if (workspaceEdit?.documentChanges) {
     for (const docChange of workspaceEdit.documentChanges) {
       if (docChange.textDocument && docChange.edits) {
-        changes.push({
-          file: docChange.textDocument.uri,
-          edits: docChange.edits.map((e: any) => ({ range: e.range, newText: e.newText })),
-        });
+        for (const e of docChange.edits) {
+          changes.push({ file: docChange.textDocument.uri, range: e.range, newText: e.newText });
+        }
       }
     }
   }
-  const totalEdits = changes.reduce((sum, c: any) => sum + c.edits.length, 0);
-  return { changes, count: totalEdits };
+  return { changes, count: changes.length };
 }
 
 // ── 批量 LSP 命令 handler ──
@@ -772,7 +772,20 @@ async function handleDocumentHighlight(body: any, activeClient: any, startTime: 
 async function handleCodeLens(body: any, activeClient: any, startTime: number) {
   if (!body.file) throw new Error('Missing parameter: file');
   const lenses = await activeClient.getCodeLens(body.file);
-  return { lenses, count: Array.isArray(lenses) ? lenses.length : 0 };
+  const parsed = Array.isArray(lenses)
+    ? lenses.map((lens: any) => {
+        const data = lens.data;
+        const parsedData = Array.isArray(data) && data.length >= 3
+          ? { fileUri: data[0], position: data[1], type: data[2] }
+          : data;
+        return {
+          range: lens.range,
+          type: parsedData?.type || null,
+          command: lens.command || null,
+        };
+      })
+    : lenses;
+  return { lenses: parsed, count: Array.isArray(parsed) ? parsed.length : 0 };
 }
 
 async function handleCompletion(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {
@@ -780,7 +793,16 @@ async function handleCompletion(body: any, activeClient: any, startTime: number,
   if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
   const result = await activeClient.getCompletion(body.file, posResult.line, posResult.col);
   const items = result?.items || result || [];
-  return { items: Array.isArray(items) ? items : [], count: Array.isArray(items) ? items.length : 0 };
+  const itemsArray = Array.isArray(items) ? items : [];
+  const mapped = itemsArray.map((item: any) => ({
+    ...item,
+    kind: CompletionItemKindMap[item.kind] || item.kind,
+  }));
+  return {
+    items: mapped,
+    count: mapped.length,
+    isIncomplete: result?.isIncomplete ?? false,
+  };
 }
 
 async function handleSignatureHelp(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {

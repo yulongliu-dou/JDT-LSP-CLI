@@ -573,18 +573,18 @@ export const COMPACT_FIELDS: CompactFieldConfig = {
   rename: ['file', 'range.start.line', 'range.start.character', 'newText'],  // TODO: edits 为嵌套数组，compact 暂按 change 级别处理
   semanticTokens: ['line', 'startChar', 'length', 'tokenType', 'tokenModifiers'],
   semtok: ['line', 'startChar', 'length', 'tokenType', 'tokenModifiers'],
-  inlayHint: ['label', 'position.line', 'position.character'],
-  codeAction: ['title', 'kind'],
+  inlayHint: ['label', 'kind', 'position.line', 'position.character'],
+  codeAction: ['title', 'command', 'arguments'],
   documentHighlight: ['kind', 'range.start.line', 'range.start.character'],
-  codeLens: ['range.start.line', 'command.title'],
+  codeLens: ['range.start.line', 'range.start.character', 'type'],
   completion: ['label', 'kind', 'detail'],
   signatureHelp: ['label', 'parameters', 'documentation'],
   declaration: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   decl: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   formatting: ['range.start.line', 'range.start.character', 'newText'],
   fmt: ['range.start.line', 'range.start.character', 'newText'],
-  prepareRename: ['start.line', 'start.character', 'end.line', 'end.character'],
-  preren: ['start.line', 'start.character', 'end.line', 'end.character'],
+  prepareRename: ['valid', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character'],
+  preren: ['valid', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character'],
 };
 
 // Symbol kinds mapping
