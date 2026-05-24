@@ -555,8 +555,8 @@ export interface CompactFieldConfig {
  */
 export const COMPACT_FIELDS: CompactFieldConfig = {
   definition: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
-  references: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
-  refs: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
+  references: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'sourceLine', 'accessType', 'via', 'targetMethod', 'context.enclosingMethod', 'context.enclosingClass', 'context.branch', 'impact.value', 'impact.valueSource', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
+  refs: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'sourceLine', 'accessType', 'via', 'targetMethod', 'context.enclosingMethod', 'context.enclosingClass', 'context.branch', 'impact.value', 'impact.valueSource', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
   symbols: ['name', 'kind', 'detail', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'selectionRange.start.line', 'selectionRange.start.character', 'parent'],
   sym: ['name', 'kind', 'detail', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'selectionRange.start.line', 'selectionRange.start.character', 'parent'],  // 别名支持
   callHierarchy: ['entry', 'calls', 'totalMethods', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],

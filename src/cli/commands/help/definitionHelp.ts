@@ -2,7 +2,7 @@ export const DEFINITION_HELP = `
 Usage: jls definition <file> [options]
        jls def <file> [options]
 
-跳转到符号的定义位置。
+跳转到符号的定义位置。字段定义附带注解信息（@Column, @JsonProperty 等）。
 
 Options:
   --method <name>       方法名（自动解析位置）
