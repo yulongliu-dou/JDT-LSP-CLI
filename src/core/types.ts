@@ -559,7 +559,7 @@ export const COMPACT_FIELDS: CompactFieldConfig = {
   refs: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'sourceLine', 'accessType', 'via', 'targetMethod', 'context.enclosingMethod', 'context.enclosingClass', 'context.branch', 'impact.value', 'impact.valueSource', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
   symbols: ['name', 'kind', 'detail', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'selectionRange.start.line', 'selectionRange.start.character', 'parent'],
   sym: ['name', 'kind', 'detail', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'selectionRange.start.line', 'selectionRange.start.character', 'parent'],  // 别名支持
-  callHierarchy: ['entry', 'calls', 'totalMethods', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
+  callHierarchy: ['entry', 'calls', 'totalMethods', 'fieldFlow', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   hover: ['contents'],
   implementations: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   impl: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
@@ -787,5 +787,17 @@ export interface LifecycleResult {
   summary: LifecycleSummary;
   references: EnhancedReference[];
   hints: LifecycleHints;
+}
+
+// ========== 二期：callHierarchy --lifecycle 字段流类型 ==========
+
+/**
+ * 调用链节点字段读写信息
+ */
+export interface FieldFlowResult {
+  /** 读取的字段列表，格式: "ClassName.fieldName" */
+  reads: string[];
+  /** 写入的字段列表，格式: "ClassName.fieldName" */
+  writes: string[];
 }
 
