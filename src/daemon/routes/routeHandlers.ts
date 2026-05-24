@@ -191,6 +191,62 @@ export async function setupRequestRouter(req: http.IncomingMessage, res: http.Se
         if (result === 'handled') return;
         break;
 
+      case '/diagnostics':
+        result = await handleDiagnostics(body, activeClient, startTime);
+        break;
+
+      case '/rename':
+        result = await handleRename(body, activeClient, startTime, res);
+        if (result === 'handled') return;
+        break;
+
+      case '/semantic-tokens':
+        result = await handleSemanticTokens(body, activeClient, startTime);
+        break;
+
+      case '/inlay-hint':
+        result = await handleInlayHint(body, activeClient, startTime, res);
+        if (result === 'handled') return;
+        break;
+
+      case '/code-action':
+        result = await handleCodeAction(body, activeClient, startTime, res);
+        if (result === 'handled') return;
+        break;
+
+      case '/document-highlight':
+        result = await handleDocumentHighlight(body, activeClient, startTime, res);
+        if (result === 'handled') return;
+        break;
+
+      case '/code-lens':
+        result = await handleCodeLens(body, activeClient, startTime);
+        break;
+
+      case '/completion':
+        result = await handleCompletion(body, activeClient, startTime, res);
+        if (result === 'handled') return;
+        break;
+
+      case '/signature-help':
+        result = await handleSignatureHelp(body, activeClient, startTime, res);
+        if (result === 'handled') return;
+        break;
+
+      case '/declaration':
+        result = await handleDeclaration(body, activeClient, startTime, res);
+        if (result === 'handled') return;
+        break;
+
+      case '/formatting':
+        result = await handleFormatting(body, activeClient, startTime);
+        break;
+
+      case '/prepare-rename':
+        result = await handlePrepareRename(body, activeClient, startTime, res);
+        if (result === 'handled') return;
+        break;
+
       case '/release':
         result = await handleRelease(body, project, startTime);
         break;
@@ -593,6 +649,168 @@ async function handleHover(body: any, activeClient: any, startTime: number, res:
   }
   const result = await activeClient.getHover(body.file, posResult.line, posResult.col);
   return result;
+}
+
+/**
+ * 处理 diagnostics 请求
+ */
+async function handleDiagnostics(body: any, activeClient: any, startTime: number) {
+  if (!body.file) {
+    throw new Error('Missing parameter: file');
+  }
+  const diagnostics = await activeClient.getDiagnostics(body.file);
+  return { diagnostics, count: diagnostics.length };
+}
+
+/**
+ * 处理 rename 请求
+ */
+async function handleRename(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {
+  if (!body.file) {
+    throw new Error('Missing parameter: file');
+  }
+  if (!body.newName) {
+    throw new Error('Missing parameter: newName');
+  }
+  const posResult = await resolvePosition(body, activeClient);
+  if ('success' in posResult) {
+    sendResponse(res, { ...posResult, elapsed: Date.now() - startTime });
+    return 'handled';
+  }
+  const workspaceEdit = await activeClient.getRename(body.file, posResult.line, posResult.col, body.newName);
+
+  // 扁平化 WorkspaceEdit
+  const changes: any[] = [];
+  if (workspaceEdit?.changes) {
+    for (const [uri, edits] of Object.entries(workspaceEdit.changes) as [string, any[]][]) {
+      changes.push({ file: uri, edits: edits.map((e: any) => ({ range: e.range, newText: e.newText })) });
+    }
+  }
+  if (workspaceEdit?.documentChanges) {
+    for (const docChange of workspaceEdit.documentChanges) {
+      if (docChange.textDocument && docChange.edits) {
+        changes.push({
+          file: docChange.textDocument.uri,
+          edits: docChange.edits.map((e: any) => ({ range: e.range, newText: e.newText })),
+        });
+      }
+    }
+  }
+  const totalEdits = changes.reduce((sum, c: any) => sum + c.edits.length, 0);
+  return { changes, count: totalEdits };
+}
+
+// ── 批量 LSP 命令 handler ──
+
+function decodeSemanticTokens(raw: any, legend?: { tokenTypes: string[]; tokenModifiers: string[] } | null) {
+  const data = raw?.data;
+  if (!data || !Array.isArray(data)) return { tokens: [], count: 0 };
+
+  const tokenTypeNames = legend?.tokenTypes || [];
+  const tokenModifierNames = legend?.tokenModifiers || [];
+
+  const tokens: any[] = [];
+  let prevLine = 0, prevChar = 0;
+  for (let i = 0; i < data.length; i += 5) {
+    const deltaLine = data[i], deltaStartChar = data[i + 1], length = data[i + 2];
+    const tokenType = data[i + 3], tokenModifiers = data[i + 4];
+    const line = deltaLine === 0 ? prevLine : prevLine + deltaLine;
+    const startChar = deltaLine === 0 ? prevChar + deltaStartChar : deltaStartChar;
+
+    const decodedModifiers: string[] = [];
+    if (tokenModifierNames.length > 0) {
+      for (let bit = 0; bit < tokenModifierNames.length; bit++) {
+        if (tokenModifiers & (1 << bit)) {
+          decodedModifiers.push(tokenModifierNames[bit]);
+        }
+      }
+    }
+
+    tokens.push({
+      line,
+      startChar,
+      length,
+      tokenType: tokenTypeNames[tokenType] || tokenType,
+      tokenModifiers: decodedModifiers.length > 0 ? decodedModifiers : tokenModifiers,
+    });
+    prevLine = line; prevChar = startChar;
+  }
+  return { tokens, count: tokens.length, resultId: raw.resultId };
+}
+
+async function handleSemanticTokens(body: any, activeClient: any, startTime: number) {
+  if (!body.file) throw new Error('Missing parameter: file');
+  const raw = await activeClient.getSemanticTokens(body.file);
+  const legend = activeClient.getSemanticTokensLegend?.() || null;
+  return decodeSemanticTokens(raw, legend);
+}
+
+async function handleInlayHint(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {
+  const posResult = await resolvePosition(body, activeClient);
+  if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
+  const hints = await activeClient.getInlayHint(body.file, posResult.line, posResult.col);
+  return { hints, count: Array.isArray(hints) ? hints.length : 0 };
+}
+
+async function handleCodeAction(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {
+  const posResult = await resolvePosition(body, activeClient);
+  if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
+  const actions = await activeClient.getCodeAction(body.file, posResult.line, posResult.col);
+  return { actions, count: Array.isArray(actions) ? actions.length : 0 };
+}
+
+async function handleDocumentHighlight(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {
+  const posResult = await resolvePosition(body, activeClient);
+  if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
+  const highlights = await activeClient.getDocumentHighlight(body.file, posResult.line, posResult.col);
+  return { highlights, count: Array.isArray(highlights) ? highlights.length : 0 };
+}
+
+async function handleCodeLens(body: any, activeClient: any, startTime: number) {
+  if (!body.file) throw new Error('Missing parameter: file');
+  const lenses = await activeClient.getCodeLens(body.file);
+  return { lenses, count: Array.isArray(lenses) ? lenses.length : 0 };
+}
+
+async function handleCompletion(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {
+  const posResult = await resolvePosition(body, activeClient);
+  if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
+  const result = await activeClient.getCompletion(body.file, posResult.line, posResult.col);
+  const items = result?.items || result || [];
+  return { items: Array.isArray(items) ? items : [], count: Array.isArray(items) ? items.length : 0 };
+}
+
+async function handleSignatureHelp(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {
+  const posResult = await resolvePosition(body, activeClient);
+  if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
+  return await activeClient.getSignatureHelp(body.file, posResult.line, posResult.col);
+}
+
+// ── 第三批 LSP 命令 handler ──
+
+async function handleDeclaration(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {
+  const posResult = await resolvePosition(body, activeClient);
+  if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
+  const result = await activeClient.getDeclaration(body.file, posResult.line, posResult.col);
+  const locations = Array.isArray(result) ? result : [];
+  return { locations, count: locations.length };
+}
+
+async function handleFormatting(body: any, activeClient: any, startTime: number) {
+  if (!body.file) throw new Error('Missing parameter: file');
+  const edits = await activeClient.getFormatting(body.file);
+  const editsArray = Array.isArray(edits) ? edits : [];
+  return { edits: editsArray, count: editsArray.length };
+}
+
+async function handlePrepareRename(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {
+  const posResult = await resolvePosition(body, activeClient);
+  if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
+  const range = await activeClient.getPrepareRename(body.file, posResult.line, posResult.col);
+  if (range && range.start && range.end) {
+    return { range, valid: true };
+  }
+  return { valid: false, reason: 'Cannot rename at this position' };
 }
 
 /**

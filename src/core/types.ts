@@ -571,8 +571,8 @@ export const COMPACT_FIELDS: CompactFieldConfig = {
   diagnostics: ['severity', 'message', 'code', 'range.start.line', 'range.start.character'],
   diag: ['severity', 'message', 'code', 'range.start.line', 'range.start.character'],
   rename: ['file', 'range.start.line', 'range.start.character', 'newText'],  // TODO: edits 为嵌套数组，compact 暂按 change 级别处理
-  semanticTokens: ['line', 'startChar', 'length', 'tokenType'],
-  semtok: ['line', 'startChar', 'length', 'tokenType'],
+  semanticTokens: ['line', 'startChar', 'length', 'tokenType', 'tokenModifiers'],
+  semtok: ['line', 'startChar', 'length', 'tokenType', 'tokenModifiers'],
   inlayHint: ['label', 'position.line', 'position.character'],
   codeAction: ['title', 'kind'],
   documentHighlight: ['kind', 'range.start.line', 'range.start.character'],
