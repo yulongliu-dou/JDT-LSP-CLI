@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as http from 'http';
-import { InitProgress, InitStage, ProjectLoadState, IndexProgress } from '../../core/types';
+import { InitProgress, InitStage, ProjectLoadState, IndexProgress, ProjectPhase } from '../../core/types';
 import { ProjectLoadEvent } from '../../projectPool';
 import { PACKAGE_VERSION } from '../../core/constants';
 import { LibraryClassLocator } from '../../libraryProvider/core/libraryClassLocator';
@@ -191,6 +191,12 @@ export class DaemonStateManager {
    *
    * 首次调用时创建实例，后续复用。
    * 通过 daemonConfigStore 加载配置，通过 LSP client 提供 classFileContents。
+   *
+   * KNOWN-LIMITATION: fetcher 闭包通过 this.client 访问当前 client。
+   * 多项目模式下 setClient() 每次 initClient 都会覆盖全局引用，
+   * 两个不同项目的请求在 URI 重写阶段交错时可能路由到错误的 LSP 进程。
+   * 影响面：jdt:// → file:// 重写中的 classFileContents 查询。
+   * TODO: 多项目模式下按项目维护独立的 Locator 实例，或让 fetcher 接受 client 参数。
    */
   getLibraryLocator(): LibraryClassLocator {
     if (!this.libraryLocator) {
@@ -283,6 +289,44 @@ export class DaemonStateManager {
         this.log(`Index progress stalled for project: ${projectPath}`);
       }
     }
+  }
+
+  /**
+   * 更新 build import 进度（异步后台 Maven/Gradle 导入）
+   */
+  updateBuildImportProgress(projectPath: string, progress: IndexProgress): void {
+    const existing = this.indexProgressMap.get(projectPath);
+    this.indexProgressMap.set(projectPath, {
+      ...(existing || { stage: 'not_started', lastUpdated: Date.now() }),
+      buildImport: progress,
+    } as any);
+  }
+
+  /**
+   * 获取 build import 进度
+   */
+  getBuildImportProgress(projectPath: string): IndexProgress | undefined {
+    const entry = this.indexProgressMap.get(projectPath) as any;
+    return entry?.buildImport;
+  }
+
+  /**
+   * 设置项目的就绪阶段 (ProjectPhase)
+   */
+  setProjectPhase(projectPath: string, phase: ProjectPhase): void {
+    const existing = this.indexProgressMap.get(projectPath);
+    this.indexProgressMap.set(projectPath, {
+      ...(existing || { stage: 'not_started', lastUpdated: Date.now() }),
+      phase,
+    } as any);
+  }
+
+  /**
+   * 获取项目的就绪阶段
+   */
+  getProjectPhase(projectPath: string): ProjectPhase | undefined {
+    const entry = this.indexProgressMap.get(projectPath) as any;
+    return entry?.phase;
   }
 
   getInitProgress() { return this.initProgress; }

@@ -441,8 +441,13 @@ export interface AutoScalingConfig {
 
 // ========== Index Progress ==========
 
+/**
+ * 项目就绪阶段
+ */
+export type ProjectPhase = 'connecting' | 'indexing' | 'ready' | 'error';
+
 export interface IndexProgress {
-  stage: 'not_started' | 'in_progress' | 'completed' | 'stalled';
+  stage: 'not_started' | 'in_progress' | 'completed' | 'stalled' | ProjectPhase;
   title?: string;
   percent?: number;
   message?: string;
@@ -488,9 +493,27 @@ export interface CLIResult<T> {
   success: boolean;
   data?: T;
   error?: string;
+  /** 机器可读错误码（如 PROJECT_NOT_LOADED, PROJECT_INDEXING） */
+  code?: string;
+  /** 人类可读消息 */
+  message?: string;
   elapsed?: number;
   /** 响应元数据，提供关于响应的附加信息 */
   metadata?: ResponseMetadata;
+  /** 恢复指导信息 */
+  recovery?: {
+    suggestion: string;
+    action?: string;
+    checkStatus?: string;
+    estimatedWait?: string;
+    indexPercent?: number;
+    estimatedRemaining?: string;
+  };
+  /** 进度信息 */
+  progress?: {
+    checkUrl?: string;
+    estimatedWait?: string;
+  };
   /** 诊断信息（项目路径不匹配时） */
   diagnosis?: {
     daemon_project: string | null;
