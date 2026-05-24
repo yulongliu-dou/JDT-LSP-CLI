@@ -575,6 +575,69 @@ async function handleReferences(body: any, activeClient: any, startTime: number,
   const refs = await activeClient.getReferences(body.file, posResult.line, posResult.col, includeDecl);
   // SP06: 对 jdt:// URI 执行重写
   const rewritten = await rewriteLocations(refs);
+
+  // lifecycle 增强模式
+  if (body.lifecycle && body.symbol) {
+    const { analyzeFieldLifecycle } = await import('../../services/fieldLifecycleService');
+    const symbols = await activeClient.getDocumentSymbols(body.file);
+
+    const flatSymbols: any[] = [];
+    function flatten(syms: any[]): void {
+      for (const sym of syms) {
+        flatSymbols.push(sym);
+        if (sym.children) flatten(sym.children);
+      }
+    }
+    flatten(symbols);
+
+    const fieldSym = flatSymbols.find((s: any) => {
+      const k = s.kind;
+      return (k === 'Field' || k === 8) && s.name === body.symbol;
+    });
+
+    const fieldType = fieldSym?.detail || 'unknown';
+    const containingClass = (body.file || '').replace(/\\/g, '/').split('/').pop()?.replace('.java', '') || 'unknown';
+
+    const lifecycleResult = await analyzeFieldLifecycle(
+      body.symbol,
+      fieldType,
+      containingClass,
+      body.file,
+      body.line,
+      body.col,
+      body.project,
+      activeClient,
+      includeDecl
+    );
+
+    lifecycleResult.references = lifecycleResult.references.map(ref => {
+      const matchingRewritten = (rewritten as any[]).find(
+        (r: any) => r.uri === ref.uri &&
+                   r.range.start.line === ref.range.start.line &&
+                   r.range.start.character === ref.range.start.character
+      );
+      if (matchingRewritten) {
+        return {
+          ...ref,
+          originalUri: matchingRewritten.originalUri,
+          originalRange: matchingRewritten.originalRange,
+          source: matchingRewritten.source,
+          note: matchingRewritten.note,
+          lockWaitMs: matchingRewritten.lockWaitMs,
+          lineMapping: matchingRewritten.lineMapping,
+        };
+      }
+      return ref;
+    });
+
+    return {
+      summary: lifecycleResult.summary,
+      references: lifecycleResult.references,
+      hints: lifecycleResult.hints,
+      count: lifecycleResult.references.length,
+    };
+  }
+
   return { references: rewritten, count: rewritten.length };
 }
 
