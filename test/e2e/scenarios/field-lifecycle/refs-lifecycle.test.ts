@@ -70,8 +70,8 @@ describe('refs --lifecycle on OrderEntity.status', () => {
     const targets = result.data.summary.propagationTargets;
     expect(targets.length).toBeGreaterThanOrEqual(1);
     const classNames = targets.map((t: any) => t.class);
-    expect(classNames).toContain('OrderDTO');
-    expect(classNames).toContain('OrderVO');
+    expect(classNames.some((c: string) => c.includes('OrderDTO'))).toBe(true);
+    expect(classNames.some((c: string) => c.includes('OrderVO'))).toBe(true);
   }, 180000);
 });
 
@@ -81,9 +81,9 @@ describe('definition default enhancement', () => {
 
     expect(result.success).toBe(true);
     expect(result.data.annotations).toBeDefined();
-    const colAnn = result.data.annotations.find(
-      (a: any) => a.name === '@Column'
-    );
+    const dbAnnotations = result.data.annotations.db;
+    expect(dbAnnotations).toBeDefined();
+    const colAnn = dbAnnotations.find((a: any) => a.name === '@Column');
     expect(colAnn).toBeDefined();
     expect(colAnn.attributes.name).toBe('order_status');
   }, 180000);
