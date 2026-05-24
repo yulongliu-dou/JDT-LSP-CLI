@@ -441,8 +441,13 @@ export interface AutoScalingConfig {
 
 // ========== Index Progress ==========
 
+/**
+ * 项目就绪阶段
+ */
+export type ProjectPhase = 'connecting' | 'indexing' | 'ready' | 'error';
+
 export interface IndexProgress {
-  stage: 'not_started' | 'in_progress' | 'completed' | 'stalled';
+  stage: 'not_started' | 'in_progress' | 'completed' | 'stalled' | ProjectPhase;
   title?: string;
   percent?: number;
   message?: string;
