@@ -9,6 +9,8 @@ import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 import { initDirectModeRewriter, rewriteDirectLocations } from '../utils/directModeRewriter';
+import { analyzeFieldLifecycle } from '../../services/fieldLifecycleService';
+import { DocumentSymbol } from '../../core/types';
 
 import { REFERENCES_HELP } from './help/referencesHelp';
 
@@ -20,7 +22,8 @@ export function registerReferencesCommand(program: Command) {
     .alias('refs')
     .description('查找符号的所有引用。')
     .configureHelp({ formatHelp: () => REFERENCES_HELP })
-    .option('--no-declaration', '排除声明本身');
+    .option('--no-declaration', '排除声明本身')
+    .option('--lifecycle', '字段全生命周期追踪模式');
   
   // 添加符号定位选项
   const symbolOptions = [
@@ -57,7 +60,9 @@ export function registerReferencesCommand(program: Command) {
     }
     
     const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
-    
+    const includeDecl = cmdOptions.declaration !== false;
+    const lifecycle = cmdOptions.lifecycle === true;
+
     await executeCommand(
       '/references',
       {
@@ -65,7 +70,10 @@ export function registerReferencesCommand(program: Command) {
         file: filePath,
         line: resolvedLine,
         col: resolvedCol,
-        includeDeclaration: cmdOptions.declaration !== false,
+        includeDeclaration: includeDecl,
+        lifecycle,
+        symbol: cmdOptions.symbol,
+        kind: cmdOptions.kind,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
       async () => {
@@ -73,8 +81,70 @@ export function registerReferencesCommand(program: Command) {
         try {
           client = await createDirectClient(opts);
           await initDirectModeRewriter(client, projectPath);
-          const result = await client.getReferences(filePath, parseInt(resolvedLine), parseInt(resolvedCol), cmdOptions.declaration !== false);
+          const result = await client.getReferences(filePath, parseInt(resolvedLine), parseInt(resolvedCol), includeDecl);
           const rewritten = await rewriteDirectLocations(result);
+
+          if (lifecycle && cmdOptions.symbol) {
+            const symbols = await client.getDocumentSymbols(filePath);
+            const flatSymbols: DocumentSymbol[] = [];
+            function flatten(syms: any[]): void {
+              for (const sym of syms) {
+                flatSymbols.push(sym);
+                if (sym.children) flatten(sym.children);
+              }
+            }
+            flatten(symbols);
+
+            const fieldSym = flatSymbols.find((s: any) => {
+              const k = s.kind;
+              return (k === 'Field' || k === 8) && s.name === cmdOptions.symbol;
+            });
+
+            const fieldType = fieldSym?.detail || 'unknown';
+            const containingClass = extractClassName(filePath);
+            const numericLine = parseInt(resolvedLine);
+            const numericCol = parseInt(resolvedCol);
+
+            const lifecycleResult = await analyzeFieldLifecycle(
+              cmdOptions.symbol,
+              fieldType,
+              containingClass,
+              filePath,
+              numericLine,
+              numericCol,
+              projectPath,
+              client as any,
+              includeDecl
+            );
+
+            lifecycleResult.references = lifecycleResult.references.map(ref => {
+              const matchingRewritten = (rewritten as any[]).find(
+                (r: any) => r.uri === ref.uri &&
+                     r.range.start.line === ref.range.start.line &&
+                     r.range.start.character === ref.range.start.character
+              );
+              if (matchingRewritten) {
+                return {
+                  ...ref,
+                  originalUri: matchingRewritten.originalUri,
+                  originalRange: matchingRewritten.originalRange,
+                  source: matchingRewritten.source,
+                  note: matchingRewritten.note,
+                  lockWaitMs: matchingRewritten.lockWaitMs,
+                  lineMapping: matchingRewritten.lineMapping,
+                };
+              }
+              return ref;
+            });
+
+            return {
+              summary: lifecycleResult.summary,
+              references: lifecycleResult.references,
+              hints: lifecycleResult.hints,
+              count: lifecycleResult.references.length,
+            };
+          }
+
           return { references: rewritten, count: rewritten.length };
         } finally {
           if (client) await client.stop();
@@ -84,4 +154,10 @@ export function registerReferencesCommand(program: Command) {
       'references'
     );
   });
+}
+
+function extractClassName(filePath: string): string {
+  const parts = filePath.replace(/\\/g, '/').split('/');
+  const fileName = parts[parts.length - 1] || '';
+  return fileName.replace(/\.java$/, '');
 }
