@@ -97,9 +97,13 @@ export async function setupRequestRouter(req: http.IncomingMessage, res: http.Se
       return;
     }
     
-    // 智能项目路径诊断
+    // 智能项目路径诊断（Windows 大小写不敏感比较，与 projectService.normalizePath 一致）
+    const normalizePathForCompare = (p: string) => {
+      const resolved = path.resolve(p);
+      return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    };
     const currentProject = daemonState.getCurrentProject();
-    if (currentProject && currentProject !== project) {
+    if (currentProject && normalizePathForCompare(currentProject) !== normalizePathForCompare(project)) {
       const diagnosis = diagnoseProjectMismatch(body, project);
       
       sendResponse(res, {
