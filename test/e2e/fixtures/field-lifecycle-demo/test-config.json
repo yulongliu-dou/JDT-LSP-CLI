@@ -1,0 +1,16 @@
+{
+  "projectName": "field-lifecycle-demo",
+  "projectPath": "E:/field-lifecycle-demo",
+  "targetField": "OrderEntity.status",
+  "expectedAnnotations": {
+    "lombok": ["@Data"],
+    "json": ["@JsonProperty"],
+    "db": ["@Column", "@Table"]
+  },
+  "expectedPropagationTargets": [
+    "OrderDTO",
+    "OrderRequest",
+    "OrderVO"
+  ],
+  "expectedEnumClass": "OrderStatus"
+}
