@@ -363,6 +363,23 @@ export class EmbeddedJreManager {
     });
   }
 
+  /**
+   * 将 destDir 下唯一的顶层目录内容上移一层（扁平化解压后的中间目录）
+   */
+  private unwrapTopDir(destDir: string): void {
+    const entries = fs.readdirSync(destDir).filter(e => !e.startsWith('.'));
+    if (entries.length !== 1) return;
+    const innerDir = path.join(destDir, entries[0]);
+    if (!fs.statSync(innerDir).isDirectory()) return;
+    const tmpDir = destDir + '_tmp';
+    fs.renameSync(innerDir, tmpDir);
+    const files = fs.readdirSync(tmpDir);
+    for (const file of files) {
+      fs.renameSync(path.join(tmpDir, file), path.join(destDir, file));
+    }
+    fs.rmdirSync(tmpDir);
+  }
+
   private async extractJre(archivePath: string, destDir: string): Promise<void> {
     ensureDir(destDir);
 
@@ -379,18 +396,16 @@ export class EmbeddedJreManager {
     }
 
     // 如果解压后只有一个中间目录，将其内容上移一层
-    const entries = fs.readdirSync(destDir).filter(e => !e.startsWith('.'));
-    if (entries.length === 1) {
-      const innerDir = path.join(destDir, entries[0]);
-      if (fs.statSync(innerDir).isDirectory()) {
-        const tmpDir = destDir + '_tmp';
-        fs.renameSync(innerDir, tmpDir);
-        const files = fs.readdirSync(tmpDir);
-        for (const file of files) {
-          fs.renameSync(path.join(tmpDir, file), path.join(destDir, file));
-        }
-        fs.rmdirSync(tmpDir);
-      }
+    this.unwrapTopDir(destDir);
+
+    // macOS Adoptium JRE tar.gz 多一层 Contents/Home/ 嵌套
+    // 结构: <version>-jre/Contents/Home/{bin,lib,...}
+    // 第一次 unwrap 后变为 Contents/Home/{bin,lib,...}
+    // 需先 Home→Contents，再 Contents→destDir
+    const contentsHome = path.join(destDir, 'Contents', 'Home');
+    if (fs.existsSync(contentsHome) && fs.statSync(contentsHome).isDirectory()) {
+      this.unwrapTopDir(path.join(destDir, 'Contents')); // Home 内容 → Contents/
+      this.unwrapTopDir(destDir);                         // Contents 内容 → destDir/
     }
   }
 
