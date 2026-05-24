@@ -39,6 +39,7 @@ export const DEFAULT_JVM_CONFIG: JvmConfig = {
   minHeapFreeRatio: DEFAULT_MIN_HEAP_FREE_RATIO,
   maxMetaspaceSize: DEFAULT_MAX_METASPACE_SIZE,
   extraArgs: [],
+  lombok: { enabled: true },
 };
 
 /**

@@ -228,7 +228,9 @@ export class DaemonStateManager {
   updateIndexProgress(projectPath: string, params: { token: string; value: { kind: string; title?: string; percentage?: number; message?: string } }): void {
     const { token, value } = params;
     const tokenLower = (token || '').toLowerCase();
-    const isRelevant = /build|index|import|workspace/i.test(tokenLower);
+    const titleLower = (value.title || '').toLowerCase();
+    const isRelevant = /build|index|import|workspace/i.test(tokenLower) ||
+                       /build|index|import|workspace/i.test(titleLower);
     if (!isRelevant) return;
 
     const existing = this.indexProgressMap.get(projectPath);

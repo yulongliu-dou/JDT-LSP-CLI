@@ -4,6 +4,7 @@
  * 负责 JDT LS 客户端的初始化、复用和切换
  */
 
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -42,6 +43,8 @@ export async function initClient(projectPath: string, options: Partial<CLIOption
   if (projectPool) {
     daemonState.updateProgress('starting', 0, '开始初始化项目...');
     const result = await projectPool.getClient(projectPath, options);
+    daemonState.updateProgress('starting', 40, '等待项目构建索引完成...');
+    await waitForBuildImport(projectPath);
     daemonState.setLastLoadEvent(result.loadEvent);
     // 多项目模式下同步全局状态，确保 isClientReady() / getLibraryLocator() 可用
     daemonState.setClient(result.client);
@@ -137,6 +140,8 @@ async function doInitClient(projectPath: string, options: Partial<CLIOptions>): 
     try {
       daemonState.updateProgress('initializing', 30, '初始化 LSP 连接...');
       await activeClient.start();
+      daemonState.updateProgress('initializing', 40, '等待项目构建索引完成...');
+      await waitForBuildImport(projectPath);
       daemonState.setClientReady(true);
       const loadTime = Date.now() - daemonState.getInitStartTime();
       daemonState.setLastLoadEvent({ 
@@ -159,6 +164,75 @@ async function doInitClient(projectPath: string, options: Partial<CLIOptions>): 
   }
   
   return { client: activeClient, loadEvent: daemonState.getLastLoadEvent() };
+}
+
+/**
+ * 等待 Maven/Gradle 构建导入完成
+ *
+ * JDT LS 内置的 Lombok 支持需要依赖 jar 进入 project build path 后才能处理注解。
+ * 构建导入通过 $/progress LSP 通知上报进度，此处轮询 daemonState.getIndexProgress()
+ * 等待导入完成后再返回 ready。
+ *
+ * 无构建文件的项目直接跳过。
+ */
+async function waitForBuildImport(projectPath: string): Promise<void> {
+  const buildFileDetected = ['pom.xml', 'build.gradle', 'build.gradle.kts']
+    .some(f => fs.existsSync(path.join(projectPath, f)));
+
+  if (!buildFileDetected) return;
+
+  const buildType = fs.existsSync(path.join(projectPath, 'pom.xml')) ? 'Maven' : 'Gradle';
+  daemonState.log(`检测到 ${buildType} 项目，等待构建导入完成...`);
+  daemonState.updateProgress('initializing', 45, `检测到 ${buildType} 项目，等待依赖导入...`);
+
+  // 等待首次进度出现（JDT LS 可能延迟启动导入）
+  const firstProgressTimeout = Date.now() + 15_000;
+  let importDetected = false;
+
+  while (Date.now() < firstProgressTimeout) {
+    const p = daemonState.getIndexProgress(projectPath);
+    if (p && p.stage !== 'not_started') {
+      const title = p.title || '';
+      if (/import/i.test(title)) {
+        importDetected = true;
+        break;
+      }
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  if (!importDetected) {
+    daemonState.log(`${buildType} 导入未检测到进度，可能已完成或无需导入，继续`);
+    return;
+  }
+
+  // 导入已开始，等待完成
+  const maxWait = 120_000;
+  const startWait = Date.now();
+
+  while (Date.now() - startWait < maxWait) {
+    const p = daemonState.getIndexProgress(projectPath);
+    if (!p) {
+      await new Promise(r => setTimeout(r, 500));
+      continue;
+    }
+    if (p.stage === 'completed') {
+      daemonState.updateProgress('initializing', 70, '依赖导入完成 (Lombok 支持已就绪)');
+      daemonState.log('构建导入完成');
+      return;
+    }
+    if (p.stage === 'stalled') {
+      daemonState.log('导入进度 stalled，可能已超时，继续');
+      return;
+    }
+    // 持续更新进度给 CLI 侧 spinner
+    if (p.percent !== undefined) {
+      daemonState.updateProgress('initializing', 45 + Math.floor(p.percent * 0.25), `${buildType} 依赖导入中...`);
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  daemonState.log(`${buildType} 导入等待超时 (${maxWait / 1000}s)，继续`);
 }
 
 /**

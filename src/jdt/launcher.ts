@@ -18,6 +18,7 @@ import { loadConfig, DEFAULT_JVM_CONFIG } from './configLoader';
 import { getJreManager } from './embedded/jreManager';
 import { getJdtlsManager } from './embedded/jdtlsManager';
 
+
 export interface JdtLaunchResult {
   process: ChildProcess;
   jdtlsPath: string;

@@ -278,6 +278,10 @@ export interface JvmConfig {
   minHeapFreeRatio: number;         // GC 后空闲堆低于此比例则扩容
   maxMetaspaceSize: string;         // 元数据区上限，如 '256m'
   extraArgs: string[];              // 额外的 JVM 参数
+  lombok?: {
+    enabled: boolean;               // 自动检测并启用 Lombok agent（默认 true）
+    agentPath?: string;             // 手动指定 lombok.jar 路径，留空则自动检测
+  };
 }
 
 /**
