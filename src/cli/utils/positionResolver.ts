@@ -595,16 +595,33 @@ export async function executeCommand(
     };
   }
   
+  /**
+   * 启动 stderr 心跳，防止 Agent 因直接模式冷启动耗时过长而超时 kill 进程。
+   * 每 2 秒向 stderr 写入一行 NDJSON 进度信息，stdout 的最终 JSON 不受影响。
+   */
+  function startHeartbeat(): NodeJS.Timeout {
+    return setInterval(() => {
+      process.stderr.write(JSON.stringify({
+        type: "progress",
+        stage: "processing",
+        elapsedMs: Date.now() - startTime,
+      }) + "\n");
+    }, 2000);
+  }
+
   // 如果禁用了守护进程，使用直接模式
   if (opts.daemon === false) {
+    const hb = startHeartbeat();
     try {
       const result = await directHandler();
+      clearInterval(hb);
       outputResult(enrichResult({
         success: true,
         data: result,
         elapsed: Date.now() - startTime,
       }), commandName, compact, outputFile);
     } catch (error: any) {
+      clearInterval(hb);
       outputResult(enrichResult({
         success: false,
         error: error.message,
@@ -613,30 +630,33 @@ export async function executeCommand(
     }
     return;
   }
-  
+
   // 尝试守护进程模式
   const daemonResult = await sendDaemonRequest(endpoint, body);
-  
+
   if (daemonResult.success || !daemonResult.error?.includes('Daemon not running')) {
     outputResult(enrichResult(daemonResult), commandName, compact, outputFile);
     return;
   }
-  
+
   // 守护进程未运行，提示用户启动或使用直接模式
   console.error('Daemon not running. Options:');
   console.error('  1. Start daemon: jls daemon start');
   console.error('  2. Use direct mode: jls --no-daemon <command> (slower)');
   console.error('');
   console.error('Starting in direct mode...');
-  
+
+  const hb = startHeartbeat();
   try {
     const result = await directHandler();
+    clearInterval(hb);
     outputResult(enrichResult({
       success: true,
       data: result,
       elapsed: Date.now() - startTime,
     }), commandName, compact, outputFile);
   } catch (error: any) {
+    clearInterval(hb);
     outputResult(enrichResult({
       success: false,
       error: error.message,
