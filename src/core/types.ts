@@ -555,19 +555,19 @@ export interface CompactFieldConfig {
  */
 export const COMPACT_FIELDS: CompactFieldConfig = {
   definition: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
-  references: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
-  refs: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
+  references: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
+  refs: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
   symbols: ['name', 'kind', 'detail', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'selectionRange.start.line', 'selectionRange.start.character', 'parent'],
   sym: ['name', 'kind', 'detail', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'selectionRange.start.line', 'selectionRange.start.character', 'parent'],  // 别名支持
   callHierarchy: ['entry', 'calls', 'totalMethods', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   hover: ['contents'],
-  implementations: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
-  impl: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
-  typeDefinition: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
-  typedef: ['uri', 'range.start.line', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
-  workspaceSymbols: ['name', 'kind', 'location.uri', 'location.range.start.line'],
-  find: ['name', 'kind', 'location.uri', 'location.range.start.line'],  // 别名支持
-  f: ['name', 'kind', 'location.uri', 'location.range.start.line'],  // 别名支持
+  implementations: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
+  impl: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
+  typeDefinition: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
+  typedef: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],  // 别名支持
+  workspaceSymbols: ['name', 'kind', 'containerName', 'location.uri', 'location.range.start.line', 'location.range.start.character'],
+  find: ['name', 'kind', 'containerName', 'location.uri', 'location.range.start.line', 'location.range.start.character'],  // 别名支持
+  f: ['name', 'kind', 'containerName', 'location.uri', 'location.range.start.line', 'location.range.start.character'],  // 别名支持
   diagnostics: ['severity', 'message', 'code', 'source', 'tags', 'range.start.line', 'range.start.character'],
   diag: ['severity', 'message', 'code', 'source', 'tags', 'range.start.line', 'range.start.character'],
   rename: ['file', 'range.start.line', 'range.start.character', 'newText'],  // TODO: edits 为嵌套数组，compact 暂按 change 级别处理
@@ -579,8 +579,8 @@ export const COMPACT_FIELDS: CompactFieldConfig = {
   codeLens: ['range.start.line', 'command.title'],
   completion: ['label', 'kind', 'detail'],
   signatureHelp: ['label', 'parameters'],
-  declaration: ['uri', 'range.start.line', 'range.start.character'],
-  decl: ['uri', 'range.start.line', 'range.start.character'],
+  declaration: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
+  decl: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   formatting: ['range.start.line', 'range.start.character', 'newText'],
   fmt: ['range.start.line', 'range.start.character', 'newText'],
   prepareRename: ['start.line', 'start.character', 'end.line', 'end.character'],

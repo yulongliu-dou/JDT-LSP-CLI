@@ -793,7 +793,8 @@ async function handleDeclaration(body: any, activeClient: any, startTime: number
   if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
   const result = await activeClient.getDeclaration(body.file, posResult.line, posResult.col);
   const locations = Array.isArray(result) ? result : [];
-  return { locations, count: locations.length };
+  const rewritten = await rewriteLocations(locations);
+  return { locations: rewritten, count: rewritten.length };
 }
 
 async function handleFormatting(body: any, activeClient: any, startTime: number) {
@@ -972,7 +973,19 @@ async function handleWorkspaceSymbols(body: any, activeClient: any, startTime: n
     kind: symbolKindToString(s.kind)
   }));
 
-  const result: any = { symbols: outputSymbols, count: outputSymbols.length };
+  // SP03: URI 重写 — workspace/symbol 返回 SymbolInformation[]，
+  // 每个符号的 location 需要单独重写（嵌套结构）
+  const rewrittenSymbols = await Promise.all(
+    outputSymbols.map(async (s: any) => {
+      if (s.location) {
+        const rewrittenLoc = await rewriteLocation(s.location);
+        return { ...s, location: rewrittenLoc };
+      }
+      return s;
+    })
+  );
+
+  const result: any = { symbols: rewrittenSymbols, count: rewrittenSymbols.length };
   if (outputSymbols.length === 0 && looksLikeJdkSymbol(query, body.kind)) {
     result.hint = buildJdkHint(query, body.kind);
   }

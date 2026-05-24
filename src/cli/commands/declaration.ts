@@ -1,5 +1,5 @@
 /**
- * References 命令 - 查找引用
+ * Declaration 命令 - 跳转到符号声明
  */
 
 import { Command } from 'commander';
@@ -10,19 +10,15 @@ import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 import { initDirectModeRewriter, rewriteDirectLocations } from '../utils/directModeRewriter';
 
-import { REFERENCES_HELP } from './help/referencesHelp';
+import { DECLARATION_HELP } from './help/declarationHelp';
 
-// ── Command ───────────────────────────────────────────────────────────────────
+export function registerDeclarationCommand(program: Command) {
+  let cmd = program
+    .command('declaration [file]')
+    .alias('decl')
+    .description('跳转到符号的声明位置（接口声明）。')
+    .configureHelp({ formatHelp: () => DECLARATION_HELP });
 
-export function registerReferencesCommand(program: Command) {
-  let referencesCmd = program
-    .command('references [file]')
-    .alias('refs')
-    .description('查找符号的所有引用。')
-    .configureHelp({ formatHelp: () => REFERENCES_HELP })
-    .option('--no-declaration', '排除声明本身');
-  
-  // 添加符号定位选项
   const symbolOptions = [
     { flags: '--method <name>', desc: 'Method name to locate (auto-resolve position)' },
     { flags: '--symbol <name>', desc: 'Symbol name to locate (auto-resolve position)' },
@@ -30,42 +26,37 @@ export function registerReferencesCommand(program: Command) {
     { flags: '--signature <sig>', desc: 'Method signature for overloads, e.g., "(String, int)"' },
     { flags: '--index <n>', desc: 'Index for multiple matches (0-based)' },
     { flags: '--kind <type>', desc: 'Symbol kind: Method, Field, Class, Interface' },
-    { flags: '--global', desc: '⚠️ Global search (requires --symbol AND --kind, JDT LS limitation)' },
+    { flags: '--global', desc: 'Global search (requires --symbol AND --kind, JDT LS limitation)' },
   ];
-  
-  for (const opt of symbolOptions) {
-    referencesCmd = referencesCmd.option(opt.flags, opt.desc);
-  }
-  
-  referencesCmd.action(async (file: string, cmdOptions: any) => {
+
+  for (const opt of symbolOptions) { cmd = cmd.option(opt.flags, opt.desc); }
+
+  cmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
 
-    // 防呆：校验参数合法性
-    const validationError = validateFileSymbolCommand(file, cmdOptions, opts, 'refs');
+    const validationError = validateFileSymbolCommand(file, cmdOptions, opts, 'decl');
     if (validationError) {
       outputResult(validationError, undefined, opts.jsonCompact, opts.output);
       return;
     }
 
     const projectPath = path.resolve(opts.project);
-    
-    // 解析位置（支持符号模式）
+
     const posResult = await getPosition(file, cmdOptions, opts);
     if ('success' in posResult) {
       outputResult(posResult, undefined, opts.jsonCompact, opts.output);
       return;
     }
-    
+
     const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
-    
+
     await executeCommand(
-      '/references',
+      '/declaration',
       {
         project: projectPath,
         file: filePath,
         line: resolvedLine,
         col: resolvedCol,
-        includeDeclaration: cmdOptions.declaration !== false,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
       async () => {
@@ -73,15 +64,16 @@ export function registerReferencesCommand(program: Command) {
         try {
           client = await createDirectClient(opts);
           await initDirectModeRewriter(client, projectPath);
-          const result = await client.getReferences(filePath, parseInt(resolvedLine), parseInt(resolvedCol), cmdOptions.declaration !== false);
-          const rewritten = await rewriteDirectLocations(result);
-          return { references: rewritten, count: rewritten.length };
+          const result = await client.getDeclaration(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
+          const locations = Array.isArray(result) ? result : [];
+          const rewritten = await rewriteDirectLocations(locations);
+          return { locations: rewritten, count: rewritten.length };
         } finally {
           if (client) await client.stop();
         }
       },
       opts,
-      'references'
+      'declaration'
     );
   });
 }

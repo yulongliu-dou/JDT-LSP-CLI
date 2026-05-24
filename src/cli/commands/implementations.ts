@@ -8,6 +8,7 @@ import { getPosition, executeCommand, createDirectClient } from '../utils/positi
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
+import { initDirectModeRewriter, rewriteDirectLocations } from '../utils/directModeRewriter';
 
 import { IMPLEMENTATIONS_HELP } from './help/implementationsHelp';
 
@@ -69,8 +70,10 @@ export function registerImplementationsCommand(program: Command) {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
+          await initDirectModeRewriter(client, projectPath);
           const result = await client.getImplementations(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
-          return { implementations: result, count: result.length };
+          const rewritten = await rewriteDirectLocations(result);
+          return { implementations: rewritten, count: rewritten.length };
         } finally {
           if (client) await client.stop();
         }

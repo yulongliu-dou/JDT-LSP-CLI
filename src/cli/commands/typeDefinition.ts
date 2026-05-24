@@ -8,6 +8,7 @@ import { getPosition, executeCommand, createDirectClient } from '../utils/positi
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
+import { initDirectModeRewriter, rewriteDirectLocations } from '../utils/directModeRewriter';
 
 import { TYPE_DEFINITION_HELP } from './help/typeDefinitionHelp';
 
@@ -72,7 +73,11 @@ export function registerTypeDefinitionCommand(program: Command) {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          return await client.getTypeDefinition(filePath, parseInt(resolvedLine), parseInt(resolvedCol), explainEmpty);
+          await initDirectModeRewriter(client, projectPath);
+          const result = await client.getTypeDefinition(filePath, parseInt(resolvedLine), parseInt(resolvedCol), explainEmpty);
+          const locations = Array.isArray(result) ? result : [];
+          const rewritten = await rewriteDirectLocations(locations);
+          return { locations: rewritten, count: rewritten.length };
         } finally {
           if (client) await client.stop();
         }

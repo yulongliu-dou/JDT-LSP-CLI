@@ -10,6 +10,7 @@ import { JdtLsClient } from '../../jdtClient';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
 import { looksLikeJdkSymbol, buildJdkHint } from '../../core/utils/jdkSymbolHint';
 import { validateFindCommand } from '../utils/paramValidator';
+import { initDirectModeRewriter, rewriteDirectSymbols } from '../utils/directModeRewriter';
 
 import { FIND_HELP } from './help/workspaceSearchHelp';
 
@@ -48,8 +49,9 @@ export function registerWorkspaceSymbolsCommand(program: Command) {
           let client: JdtLsClient | null = null;
           try {
             client = await createDirectClient(opts);
+            await initDirectModeRewriter(client, projectPath);
             let symbols = await client.getWorkspaceSymbols(query, parseInt(cmdOptions.limit));
-            
+
             // 按 kind 过滤 - 将字符串转换为数字进行比较
             if (cmdOptions.kind) {
               const kindNumber = stringToSymbolKind(cmdOptions.kind);
@@ -58,20 +60,23 @@ export function registerWorkspaceSymbolsCommand(program: Command) {
               }
               symbols = symbols.filter((s: any) => s.kind === kindNumber);
             }
-            
+
             // 将 kind 数字转换为字符串用于输出
             const outputSymbols = symbols.map((s: any) => ({
               ...s,
               kind: symbolKindToString(s.kind)
             }));
 
-            if (outputSymbols.length === 0 && looksLikeJdkSymbol(query, cmdOptions.kind)) {
+            // URI 重写（SymbolInformation 的嵌套 location）
+            const rewrittenSymbols = await rewriteDirectSymbols(outputSymbols);
+
+            if (rewrittenSymbols.length === 0 && looksLikeJdkSymbol(query, cmdOptions.kind)) {
               throw new Error(
                 `No symbols found for '${query}'.\n` + buildJdkHint(query, cmdOptions.kind)
               );
             }
 
-            return { symbols: outputSymbols, count: outputSymbols.length };
+            return { symbols: rewrittenSymbols, count: rewrittenSymbols.length };
           } finally {
             if (client) await client.stop();
           }
