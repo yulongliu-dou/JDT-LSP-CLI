@@ -110,6 +110,23 @@ export class ProjectPool {
   }
 
   /**
+   * 获取项目状态（供健康端点和就绪检查使用）
+   */
+  getStatus(projectPath: string): 'initializing' | 'ready' | 'error' | 'not_loaded' {
+    const normalized = this.normalizePath(projectPath);
+    const entry = this.clients.get(normalized);
+    if (!entry) return 'not_loaded';
+    return entry.status;
+  }
+
+  /**
+   * 获取所有活跃项目路径列表
+   */
+  getActiveProjects(): string[] {
+    return Array.from(this.clients.keys());
+  }
+
+  /**
    * 创建新的项目客户端
    */
   private async createClient(projectPath: string, options: Partial<CLIOptions> = {}, evictedProject?: string): Promise<{ client: JdtLsClient; loadEvent: ProjectLoadEvent }> {

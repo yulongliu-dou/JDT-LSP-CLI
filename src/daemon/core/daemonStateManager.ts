@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as http from 'http';
-import { InitProgress, InitStage, ProjectLoadState, IndexProgress } from '../../core/types';
+import { InitProgress, InitStage, ProjectLoadState, IndexProgress, ProjectPhase } from '../../core/types';
 import { ProjectLoadEvent } from '../../projectPool';
 import { PACKAGE_VERSION } from '../../core/constants';
 import { LibraryClassLocator } from '../../libraryProvider/core/libraryClassLocator';
@@ -283,6 +283,44 @@ export class DaemonStateManager {
         this.log(`Index progress stalled for project: ${projectPath}`);
       }
     }
+  }
+
+  /**
+   * 更新 build import 进度（异步后台 Maven/Gradle 导入）
+   */
+  updateBuildImportProgress(projectPath: string, progress: IndexProgress): void {
+    const existing = this.indexProgressMap.get(projectPath);
+    this.indexProgressMap.set(projectPath, {
+      ...(existing || { stage: 'not_started', lastUpdated: Date.now() }),
+      buildImport: progress,
+    } as any);
+  }
+
+  /**
+   * 获取 build import 进度
+   */
+  getBuildImportProgress(projectPath: string): IndexProgress | undefined {
+    const entry = this.indexProgressMap.get(projectPath) as any;
+    return entry?.buildImport;
+  }
+
+  /**
+   * 设置项目的就绪阶段 (ProjectPhase)
+   */
+  setProjectPhase(projectPath: string, phase: ProjectPhase): void {
+    const existing = this.indexProgressMap.get(projectPath);
+    this.indexProgressMap.set(projectPath, {
+      ...(existing || { stage: 'not_started', lastUpdated: Date.now() }),
+      phase,
+    } as any);
+  }
+
+  /**
+   * 获取项目的就绪阶段
+   */
+  getProjectPhase(projectPath: string): ProjectPhase | undefined {
+    const entry = this.indexProgressMap.get(projectPath) as any;
+    return entry?.phase;
   }
 
   getInitProgress() { return this.initProgress; }
