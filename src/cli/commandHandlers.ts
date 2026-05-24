@@ -13,6 +13,7 @@ import { outputResult } from './utils/outputHandler';
 import { stringToSymbolKind, symbolKindToString } from '../core/utils/symbolKind';
 import { rewriteCallItem } from '../libraryProvider/uriRewriter';
 import { validateCallHierarchyCommand } from './utils/paramValidator';
+import { analyzeMethodFieldFlow, readSourceLines } from '../services/fieldLifecycleService';
 
 /**
  * Call Hierarchy 命令实现
@@ -236,8 +237,9 @@ export function registerCallHierarchyCommand(program: Command) {
     .option('--fetch-source <ids>', 'Comma-separated method IDs to fetch source (lazy mode)')
     .option('--expand-depth <ids>', 'Comma-separated method IDs to expand sub-calls (lazy mode)')
     .option('--snapshot-path <path>', 'Output path for snapshot mode')
-    .option('--max-summary-depth <n>', 'Max depth for summary mode', '2');
-  
+    .option('--max-summary-depth <n>', 'Max depth for summary mode', '2')
+    .option('--lifecycle', '字段级读写追踪模式（callee 节点附带 fieldFlow）', false);
+
   for (const opt of symbolOptions) {
     callHierarchyCmd = callHierarchyCmd.option(opt.flags, opt.desc);
   }
@@ -314,13 +316,44 @@ export function registerCallHierarchyCommand(program: Command) {
                   callee: cmdOptions.incoming ? item.name : target.name,
                   location: { uri: target.uri, range: target.range },
                   kind: target.kind,
+                  detail: target.detail,
                 });
                 await collectCalls(target, depth + 1);
               }
             }
             
             await collectCalls(items[0], 0);
-            
+
+            if (cmdOptions.lifecycle) {
+              const sourceLinesCache = new Map<string, string[]>();
+              for (const call of allCalls) {
+                try {
+                  const callUri = call.location.uri;
+                  if (!callUri || !callUri.startsWith('file://')) continue;
+                  const callFilePath = callUri.replace('file://', '').replace(/^\/([A-Za-z]:)/, '$1');
+                  if (!sourceLinesCache.has(callFilePath)) {
+                    sourceLinesCache.set(callFilePath, readSourceLines(callFilePath));
+                  }
+                  const lines = sourceLinesCache.get(callFilePath)!;
+                  const detail = call.detail || '';
+                  call.fieldFlow = analyzeMethodFieldFlow(
+                    lines,
+                    call.location.range.start.line,
+                    call.location.range.end.line,
+                    detail
+                  );
+                  delete call.detail;
+                } catch {
+                  call.fieldFlow = { reads: [], writes: [] };
+                  delete call.detail;
+                }
+              }
+            } else {
+              for (const call of allCalls) {
+                delete call.detail;
+              }
+            }
+
             return {
               entry: { name: items[0].name, kind: items[0].kind, detail: items[0].detail, uri: items[0].uri, range: items[0].range },
               calls: allCalls,
