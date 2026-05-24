@@ -169,6 +169,7 @@ export class EmbeddedJreManager {
     try {
       await downloadFileWithRetry(asset.downloadUrl, downloadTmp, combinedSignal, DOWNLOAD_RETRY_MAX, onDownloadProgress);
     } catch (err: any) {
+      try { fs.unlinkSync(downloadTmp); } catch { /* ignore */ }
       // 仅 AbortError 才可能是速度监控触发；网络错误等直接透传，避免误判
       if (err.name === 'AbortError' && speedAc.signal.aborted && !signal?.aborted) {
         throw Object.assign(new Error(speedAc.signal.reason || '下载速度过慢'), { name: 'SpeedTooSlow' });
@@ -176,44 +177,46 @@ export class EmbeddedJreManager {
       throw err;
     }
 
-    console.log('  正在校验 SHA256...');
-    const valid = await this.verifyChecksum(downloadTmp, asset.checksum);
-    if (!valid) {
-      console.warn('⚠️  SHA256 校验未通过，继续使用（镜像文件可能尚在同步中）');
-    } else {
-      console.log('✓ SHA256 校验通过');
+    try {
+      console.log('  正在校验 SHA256...');
+      const valid = await this.verifyChecksum(downloadTmp, asset.checksum);
+      if (!valid) {
+        console.warn('⚠️  SHA256 校验未通过，继续使用（镜像文件可能尚在同步中）');
+      } else {
+        console.log('✓ SHA256 校验通过');
+      }
+
+      console.log('  正在解压...');
+      await this.extractJre(downloadTmp, destDir);
+
+      // Unix: 确保 java 可执行
+      if (os.platform() !== 'win32') {
+        try { fs.chmodSync(javaExe, 0o755); } catch { /* ignore */ }
+      }
+
+      // 解压后验证 Java 可执行
+      const detectedVersion = detectJavaVersion(javaExe);
+      if (detectedVersion === null || detectedVersion < JRE_TARGET_VERSION) {
+        const msg = `Java 版本验证失败 (检测到: ${detectedVersion ?? '无'}, 需要 >= ${JRE_TARGET_VERSION})`;
+        console.log(`   ${msg}`);
+        try { fs.rmSync(destDir, { recursive: true, force: true }); } catch { /* ignore */ }
+        throw new Error(msg);
+      }
+
+      console.log(`✓ 解压完成: ${destDir} (Java ${detectedVersion})`);
+      console.log('   JRE 就绪，正在启动 JDT LS...');
+      console.log('');
+
+      return {
+        version: asset.version,
+        path: destDir,
+        javaExe,
+        source: 'embedded',
+      };
+    } finally {
+      // 确保临时文件在任何路径下都被清理（成功 / SHA256 失败 / 解压失败 / 版本验证失败）
+      try { fs.unlinkSync(downloadTmp); } catch { /* ignore */ }
     }
-
-    console.log('  正在解压...');
-    await this.extractJre(downloadTmp, destDir);
-
-    // 清理临时文件
-    try { fs.unlinkSync(downloadTmp); } catch { /* ignore */ }
-
-    // Unix: 确保 java 可执行
-    if (os.platform() !== 'win32') {
-      try { fs.chmodSync(javaExe, 0o755); } catch { /* ignore */ }
-    }
-
-    // 解压后验证 Java 可执行
-    const detectedVersion = detectJavaVersion(javaExe);
-    if (detectedVersion === null || detectedVersion < JRE_TARGET_VERSION) {
-      const msg = `Java 版本验证失败 (检测到: ${detectedVersion ?? '无'}, 需要 >= ${JRE_TARGET_VERSION})`;
-      console.log(`   ${msg}`);
-      try { fs.rmSync(destDir, { recursive: true, force: true }); } catch { /* ignore */ }
-      throw new Error(msg);
-    }
-
-    console.log(`✓ 解压完成: ${destDir} (Java ${detectedVersion})`);
-    console.log('   JRE 就绪，正在启动 JDT LS...');
-    console.log('');
-
-    return {
-      version: asset.version,
-      path: destDir,
-      javaExe,
-      source: 'embedded',
-    };
   }
 
   /**
@@ -399,13 +402,20 @@ export class EmbeddedJreManager {
     this.unwrapTopDir(destDir);
 
     // macOS Adoptium JRE tar.gz 多一层 Contents/Home/ 嵌套
-    // 结构: <version>-jre/Contents/Home/{bin,lib,...}
-    // 第一次 unwrap 后变为 Contents/Home/{bin,lib,...}
-    // 需先 Home→Contents，再 Contents→destDir
+    // 结构: <version>-jre/Contents/{Home,MacOS,_CodeSignature}
+    // 第一次 unwrap 后变为 Contents/{Home,MacOS,_CodeSignature}
+    // Contents 下有多个条目，不能复用 unwrapTopDir，直接定位 Home
     const contentsHome = path.join(destDir, 'Contents', 'Home');
     if (fs.existsSync(contentsHome) && fs.statSync(contentsHome).isDirectory()) {
-      this.unwrapTopDir(path.join(destDir, 'Contents')); // Home 内容 → Contents/
-      this.unwrapTopDir(destDir);                         // Contents 内容 → destDir/
+      const tmpDir = destDir + '_tmp';
+      fs.renameSync(contentsHome, tmpDir);
+      const files = fs.readdirSync(tmpDir);
+      for (const file of files) {
+        fs.renameSync(path.join(tmpDir, file), path.join(destDir, file));
+      }
+      fs.rmdirSync(tmpDir);
+      // 清理 Contents 目录（剩余 MacOS/_CodeSignature 等无用）
+      try { fs.rmSync(path.join(destDir, 'Contents'), { recursive: true, force: true }); } catch { /* ignore */ }
     }
   }
 
