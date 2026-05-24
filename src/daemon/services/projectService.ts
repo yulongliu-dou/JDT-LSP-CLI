@@ -45,8 +45,12 @@ export async function initClient(projectPath: string, options: Partial<CLIOption
     const result = await projectPool.getClient(projectPath, options);
     daemonState.setLastLoadEvent(result.loadEvent);
     if (result.loadEvent?.type !== 'reused') {
-      daemonState.updateProgress('starting', 40, '等待项目构建索引完成...');
-      await waitForBuildImport(projectPath);
+      daemonState.updateProgress('indexing', 50, '等待 workspace 索引完成...');
+      await waitForIndexing(projectPath);
+    }
+    // 异步后台 Maven 导入（不阻塞 ready）
+    if (result.loadEvent?.type !== 'reused') {
+      scheduleBuildImportAsync(projectPath);
     }
     // 多项目模式下同步全局状态，确保 isClientReady() / getLibraryLocator() 可用
     daemonState.setClient(result.client);
@@ -141,10 +145,14 @@ async function doInitClient(projectPath: string, options: Partial<CLIOptions>): 
     
     try {
       daemonState.updateProgress('initializing', 30, '初始化 LSP 连接...');
+      daemonState.setProjectPhase(projectPath, 'connecting');
       await activeClient.start();
-      daemonState.updateProgress('initializing', 40, '等待项目构建索引完成...');
-      await waitForBuildImport(projectPath);
+      daemonState.setProjectPhase(projectPath, 'indexing');
+      daemonState.updateProgress('indexing', 50, '等待 workspace 索引完成...');
+      await waitForIndexing(projectPath);
       daemonState.setClientReady(true);
+      // 异步后台 Maven 导入（不阻塞 ready）
+      scheduleBuildImportAsync(projectPath);
       const loadTime = Date.now() - daemonState.getInitStartTime();
       daemonState.setLastLoadEvent({ 
         type: evictedProject ? 'reloaded' : 'new', 
@@ -169,47 +177,42 @@ async function doInitClient(projectPath: string, options: Partial<CLIOptions>): 
 }
 
 /**
- * 等待 Maven/Gradle 构建导入完成
+ * 等待 workspace 源文件索引完成
  *
- * JDT LS 内置的 Lombok 支持需要依赖 jar 进入 project build path 后才能处理注解。
- * 构建导入通过 $/progress LSP 通知上报进度，此处轮询 daemonState.getIndexProgress()
- * 等待导入完成后再返回 ready。
+ * JDT LS 在启动后会通过 $/progress 上报索引 job。
+ * 索引未完成时 LSP 查询响应慢或结果不完整。
+ * 此处轮询 daemonState.getIndexProgress() 等待索引完成。
  *
- * 无构建文件的项目直接跳过。
+ * 无构建文件或长时间无索引进度的项目直接跳过。
  */
-async function waitForBuildImport(projectPath: string): Promise<void> {
-  const buildFileDetected = ['pom.xml', 'build.gradle', 'build.gradle.kts']
-    .some(f => fs.existsSync(path.join(projectPath, f)));
+async function waitForIndexing(projectPath: string): Promise<void> {
+  daemonState.updateProgress('indexing', 50, '等待 workspace 索引完成...');
 
-  if (!buildFileDetected) return;
-
-  const buildType = fs.existsSync(path.join(projectPath, 'pom.xml')) ? 'Maven' : 'Gradle';
-  daemonState.log(`检测到 ${buildType} 项目，等待构建导入完成...`);
-  daemonState.updateProgress('initializing', 45, `检测到 ${buildType} 项目，等待依赖导入...`);
-
-  // 等待首次进度出现（JDT LS 可能延迟启动导入）
-  const firstProgressTimeout = Date.now() + 15_000;
-  let importDetected = false;
+  // Phase 1: 等待首次索引进度出现（30s 超时）
+  const firstProgressTimeout = Date.now() + 30_000;
+  let indexDetected = false;
 
   while (Date.now() < firstProgressTimeout) {
     const p = daemonState.getIndexProgress(projectPath);
     if (p && p.stage !== 'not_started') {
-      const title = p.title || '';
-      if (/import/i.test(title)) {
-        importDetected = true;
+      const title = (p.title || '').toLowerCase();
+      // 排除 import 类 job（由 buildImport 后台处理）
+      if (!/import/i.test(title) && /build|index|workspace/i.test(title)) {
+        indexDetected = true;
         break;
       }
     }
     await new Promise(r => setTimeout(r, 500));
   }
 
-  if (!importDetected) {
-    daemonState.log(`${buildType} 导入未检测到进度，可能已完成或无需导入，继续`);
+  if (!indexDetected) {
+    daemonState.log('未检测到索引进度，可能无构建文件或索引已完成，继续');
+    daemonState.setProjectPhase(projectPath, 'ready');
     return;
   }
 
-  // 导入已开始，等待完成
-  const maxWait = 120_000;
+  // Phase 2: 等待所有索引 job 完成或 stalled（300s 超时）
+  const maxWait = 300_000;
   const startWait = Date.now();
 
   while (Date.now() - startWait < maxWait) {
@@ -219,22 +222,115 @@ async function waitForBuildImport(projectPath: string): Promise<void> {
       continue;
     }
     if (p.stage === 'completed') {
-      daemonState.updateProgress('initializing', 70, '依赖导入完成 (Lombok 支持已就绪)');
-      daemonState.log('构建导入完成');
+      daemonState.updateProgress('indexing', 100, 'workspace 索引完成');
+      daemonState.log('workspace 索引完成');
+      daemonState.setProjectPhase(projectPath, 'ready');
       return;
     }
     if (p.stage === 'stalled') {
-      daemonState.log('导入进度 stalled，可能已超时，继续');
+      daemonState.log('索引进度 stalled，继续');
+      daemonState.setProjectPhase(projectPath, 'ready');
       return;
     }
-    // 持续更新进度给 CLI 侧 spinner
     if (p.percent !== undefined) {
-      daemonState.updateProgress('initializing', 45 + Math.floor(p.percent * 0.25), `${buildType} 依赖导入中...`);
+      daemonState.updateProgress('indexing', 50 + Math.floor(p.percent * 0.5), `workspace 索引中 (${p.percent}%)...`);
     }
     await new Promise(r => setTimeout(r, 500));
   }
 
-  daemonState.log(`${buildType} 导入等待超时 (${maxWait / 1000}s)，继续`);
+  daemonState.log(`索引等待超时 (${maxWait / 1000}s)，继续`);
+  daemonState.setProjectPhase(projectPath, 'ready');
+}
+
+/**
+ * 异步后台等待 Maven/Gradle 构建导入完成
+ *
+ * 不影响 ready 状态，独立在后台运行。
+ * 完成后更新 daemonState.updateBuildImportProgress() 供 /health 暴露。
+ */
+function scheduleBuildImportAsync(projectPath: string): void {
+  queueMicrotask(async () => {
+    try {
+      const buildFileDetected = ['pom.xml', 'build.gradle', 'build.gradle.kts']
+        .some(f => fs.existsSync(path.join(projectPath, f)));
+
+      if (!buildFileDetected) {
+        daemonState.updateBuildImportProgress(projectPath, {
+          stage: 'completed', percent: 100, lastUpdated: Date.now(),
+        });
+        return;
+      }
+
+      const buildType = fs.existsSync(path.join(projectPath, 'pom.xml')) ? 'Maven' : 'Gradle';
+      daemonState.log(`[buildImport] 检测到 ${buildType} 项目，异步等待依赖导入...`);
+      daemonState.updateBuildImportProgress(projectPath, {
+        stage: 'in_progress', percent: 0, title: `${buildType} 依赖导入`,
+        lastUpdated: Date.now(),
+      });
+
+      // Phase 1: 等待首次 import 进度（60s 超时）
+      const firstProgressTimeout = Date.now() + 60_000;
+      let importDetected = false;
+
+      while (Date.now() < firstProgressTimeout) {
+        const p = daemonState.getIndexProgress(projectPath);
+        if (p && p.stage !== 'not_started') {
+          const title = (p.title || '').toLowerCase();
+          if (/import/i.test(title)) {
+            importDetected = true;
+            break;
+          }
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      if (!importDetected) {
+        daemonState.log(`[buildImport] ${buildType} 导入未检测到进度，可能已完成或无需导入`);
+        daemonState.updateBuildImportProgress(projectPath, {
+          stage: 'completed', percent: 100, lastUpdated: Date.now(),
+        });
+        return;
+      }
+
+      // Phase 2: 等待完成（300s 超时）
+      const maxWait = 300_000;
+      const startWait = Date.now();
+
+      while (Date.now() - startWait < maxWait) {
+        const p = daemonState.getIndexProgress(projectPath);
+        if (!p) { await new Promise(r => setTimeout(r, 500)); continue; }
+        if (p.stage === 'completed') {
+          daemonState.log('[buildImport] 构建导入完成 (Lombok 支持已就绪)');
+          daemonState.updateBuildImportProgress(projectPath, {
+            stage: 'completed', percent: 100, title: p.title,
+            lastUpdated: Date.now(),
+          });
+          return;
+        }
+        if (p.stage === 'stalled') {
+          daemonState.log('[buildImport] 导入进度 stalled，可能已超时');
+          daemonState.updateBuildImportProgress(projectPath, {
+            stage: 'stalled', percent: p.percent, lastUpdated: Date.now(),
+          });
+          return;
+        }
+        if (p.percent !== undefined) {
+          daemonState.updateBuildImportProgress(projectPath, {
+            stage: 'in_progress', percent: p.percent, title: p.title,
+            lastUpdated: Date.now(),
+          });
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      daemonState.log(`[buildImport] ${buildType} 导入等待超时 (${maxWait / 1000}s)`);
+      daemonState.updateBuildImportProgress(projectPath, {
+        stage: 'stalled', lastUpdated: Date.now(),
+      });
+    } catch (e: any) {
+      daemonState.log(`[buildImport] 异常: ${e?.message || e}`);
+    }
+  });
 }
 
 /**
