@@ -547,15 +547,34 @@ async function handleDefinition(body: any, activeClient: any, startTime: number,
   }
   const result = await activeClient.getDefinition(body.file, posResult.line, posResult.col);
   // SP06: 对 jdt:// URI 执行重写
+  let rewritten: any = null;
   if (result) {
     if (result.uri && result.range) {
-      // 单个 Location
-      return await rewriteLocation(result);
+      rewritten = await rewriteLocation(result);
     } else if (Array.isArray(result)) {
-      return await rewriteLocations(result);
+      rewritten = await rewriteLocations(result);
     }
   }
-  return result;
+
+  // Field kind: attach annotation info
+  if (body.kind === 'Field' && body.symbol && rewritten) {
+    const { extractAnnotations } = await import('../../services/fieldLifecycleService');
+    try {
+      const defFile = Array.isArray(rewritten) ? rewritten[0] : rewritten;
+      if (defFile?.uri) {
+        const defFilePath = defFile.uri.replace('file://', '').replace(/^\/([A-Za-z]:)/, '$1');
+        const content = await import('fs').then(m => m.readFileSync(defFilePath, 'utf-8'));
+        const lines = content.split('\n');
+        const lineNum = (defFile.range?.start?.line || 0) + 1;
+        const declLine = lines[lineNum - 1]?.trim() || '';
+        const className = defFilePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.java$/, '') || '';
+        const annotations = extractAnnotations(lines, declLine, body.symbol, className);
+        return { definition: Array.isArray(rewritten) ? rewritten : [rewritten], annotations };
+      }
+    } catch { /* non-blocking */ }
+  }
+
+  return rewritten || result;
 }
 
 /**

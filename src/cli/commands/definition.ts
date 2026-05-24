@@ -10,6 +10,7 @@ import { JdtLsClient } from '../../jdtClient';
 import { resolveSymbol, buildSymbolQuery } from '../../symbolResolver';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 import { initDirectModeRewriter, rewriteDirectLocations, rewriteDirectLocation } from '../utils/directModeRewriter';
+import { extractAnnotations } from '../../services/fieldLifecycleService';
 
 import { DEFINITION_HELP } from './help/definitionHelp';
 
@@ -94,14 +95,32 @@ export function registerDefinitionCommand(program: Command) {
             }
           }
           const defs = await client.getDefinition(filePath, finalLine, finalCol);
+          let result: any = defs;
           if (defs) {
             if (defs.uri && defs.range) {
-              return rewriteDirectLocation(defs);
+              result = await rewriteDirectLocation(defs);
             } else if (Array.isArray(defs)) {
-              return rewriteDirectLocations(defs);
+              result = await rewriteDirectLocations(defs);
             }
           }
-          return defs;
+
+          // Field kind: attach annotation info
+          if (cmdOptions.kind === 'Field' && cmdOptions.symbol && result) {
+            try {
+              const content = await import('fs').then(m => m.readFileSync(filePath, 'utf-8'));
+              const lines = content.split('\n');
+              const declLine = lines[finalLine - 1]?.trim() || '';
+              const className = filePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.java$/, '') || '';
+              const annotations = extractAnnotations(lines, declLine, cmdOptions.symbol, className);
+
+              return {
+                definition: Array.isArray(result) ? result : [result],
+                annotations,
+              };
+            } catch { /* annotation extraction failure is non-blocking */ }
+          }
+
+          return result;
         } finally {
           if (client) await client.stop();
         }
