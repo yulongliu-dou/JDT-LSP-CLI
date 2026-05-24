@@ -150,6 +150,8 @@ export async function setupRequestRouter(req: http.IncomingMessage, res: http.Se
     }
 
     // 确保 Locator 已注册（首次 initClient 成功后即可设置）
+    // KNOWN-LIMITATION: getLibraryLocator() 返回的 fetcher 闭包通过 this.client 访问
+    // 当前 client，并发请求时存在路由到错误 LSP 进程的风险（详见 daemonStateManager）。
     setLibraryLocator(daemonState.getLibraryLocator());
 
     // FP5：多项目模式下追踪活跃请求（供 AutoScaler drain 使用）
@@ -303,15 +305,15 @@ export async function setupRequestRouter(req: http.IncomingMessage, res: http.Se
         evictedProject: loadEvent.evictedProject,
       };
     }
-    // 附加 buildImport hint（Maven 导入后台未完成时）
+    response.metadata = metadata;
+
+    // 附加 buildImport hint（Maven 导入后台未完成时），按设计文档置于响应顶层
     const buildImportProgress = daemonState.getBuildImportProgress(project);
     if (buildImportProgress && buildImportProgress.stage === 'in_progress') {
-      metadata.hint = {
+      (response as any).hint = {
         buildImport: `Maven 依赖导入尚未完成 (${buildImportProgress.percent || 0}%)，无重大影响，仅涉及 Lombok 生成的 get/set 方法暂时不可见`,
       };
     }
-
-    response.metadata = metadata;
 
     sendResponse(res, response);
 
@@ -354,6 +356,22 @@ function checkProjectReadiness(
           action: `curl -X POST http://127.0.0.1:9876/project-load -H 'Content-Type: application/json' -d '{"project": "${project}"}'`,
           checkStatus: 'curl http://127.0.0.1:9876/health',
           estimatedWait: '首次加载约 30-60 秒',
+        },
+        elapsed: Date.now() - startTime,
+      });
+      return true;
+    }
+
+    // 检查是否初始化失败
+    if (status === 'error') {
+      sendResponse(res, {
+        success: false,
+        code: 'PROJECT_ERROR',
+        message: '项目初始化失败，请检查守护进程日志',
+        recovery: {
+          suggestion: '查看日志后尝试重新加载项目',
+          action: `curl -X POST http://127.0.0.1:9876/project-load -H 'Content-Type: application/json' -d '{"project": "${project}"}'`,
+          checkStatus: 'curl http://127.0.0.1:9876/health',
         },
         elapsed: Date.now() - startTime,
       });
@@ -552,6 +570,9 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
     }
 
     if (bestPhaseOrder === -1) overallStatus = 'idle';
+  } else if (projectPool) {
+    // 多项目模式但池为空（所有项目已被淘汰），避免回退到单项目 stale 状态
+    overallStatus = 'idle';
   } else if (!currentProject) {
     overallStatus = 'idle';
   } else if (isReady) {
@@ -573,38 +594,42 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
 
   // ---- 多项目列表（含 phase + 索引进度 + buildImport + 进程内存） ----
   let projects: any[] | undefined;
-  if (projectPool && projectPool.size > 0) {
-    const activeProjects = projectPool.getActiveProjects();
-    projects = await Promise.all(
-      activeProjects.map(async (projPath: string) => {
-        const projStatus = projectPool.getStatus(projPath);
-        const projPhase = daemonState.getProjectPhase(projPath) || 'indexing';
-        const projBuildImport = daemonState.getBuildImportProgress(projPath);
-        const entry: any = {
-          path: projPath,
-          status: projStatus,
-          phase: projPhase,
-          loadTime: projectPool.getProjectLoadTime ? projectPool.getProjectLoadTime(projPath) : undefined,
-          lastAccess: Date.now(),
-          priority: 0,
-          indexProgress: daemonState.getIndexProgress(projPath) || { stage: 'not_started', percent: 0 },
-        };
-        if (projBuildImport && projBuildImport.stage !== 'completed') {
-          entry.buildImport = projBuildImport;
-        }
-        // 进程内存
-        if (memoryMonitor) {
-          const pid = projectPool.getProjectPid(projPath);
-          if (pid) {
-            try {
-              const mem = await memoryMonitor.getProcessMemory(pid, projPath);
-              entry.processMemory = { pid: mem.pid, rssMB: mem.rssMB, timestamp: mem.timestamp };
-            } catch { /* non-critical */ }
+  if (projectPool) {
+    if (projectPool.size === 0) {
+      projects = [];
+    } else {
+      const activeProjects = projectPool.getActiveProjects();
+      projects = await Promise.all(
+        activeProjects.map(async (projPath: string) => {
+          const projStatus = projectPool.getStatus(projPath);
+          const projPhase = daemonState.getProjectPhase(projPath) || 'indexing';
+          const projBuildImport = daemonState.getBuildImportProgress(projPath);
+          const entry: any = {
+            path: projPath,
+            status: projStatus,
+            phase: projPhase,
+            loadTime: projectPool.getProjectLoadTime ? projectPool.getProjectLoadTime(projPath) : undefined,
+            lastAccess: Date.now(),
+            priority: 0,
+            indexProgress: daemonState.getIndexProgress(projPath) || { stage: 'not_started', percent: 0 },
+          };
+          if (projBuildImport && projBuildImport.stage !== 'completed') {
+            entry.buildImport = projBuildImport;
           }
-        }
-        return entry;
-      })
-    );
+          // 进程内存
+          if (memoryMonitor) {
+            const pid = projectPool.getProjectPid(projPath);
+            if (pid) {
+              try {
+                const mem = await memoryMonitor.getProcessMemory(pid, projPath);
+                entry.processMemory = { pid: mem.pid, rssMB: mem.rssMB, timestamp: mem.timestamp };
+              } catch { /* non-critical */ }
+            }
+          }
+          return entry;
+        })
+      );
+    }
   }
 
   // ---- Memory section ----

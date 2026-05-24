@@ -191,6 +191,12 @@ export class DaemonStateManager {
    *
    * 首次调用时创建实例，后续复用。
    * 通过 daemonConfigStore 加载配置，通过 LSP client 提供 classFileContents。
+   *
+   * KNOWN-LIMITATION: fetcher 闭包通过 this.client 访问当前 client。
+   * 多项目模式下 setClient() 每次 initClient 都会覆盖全局引用，
+   * 两个不同项目的请求在 URI 重写阶段交错时可能路由到错误的 LSP 进程。
+   * 影响面：jdt:// → file:// 重写中的 classFileContents 查询。
+   * TODO: 多项目模式下按项目维护独立的 Locator 实例，或让 fetcher 接受 client 参数。
    */
   getLibraryLocator(): LibraryClassLocator {
     if (!this.libraryLocator) {

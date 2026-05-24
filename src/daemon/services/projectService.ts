@@ -41,10 +41,22 @@ export async function initClient(projectPath: string, options: Partial<CLIOption
   
   // 多项目模式：使用 ProjectPool（内部已自行管理并发）
   if (projectPool) {
+    // 新项目：标记 connecting 阶段，确保 /health 在初始化期间可展示正确 phase
+    const existingStatus = projectPool.getStatus(projectPath);
+    if (!existingStatus || existingStatus === 'not_loaded') {
+      daemonState.setProjectPhase(projectPath, 'connecting');
+    }
     daemonState.updateProgress('starting', 0, '开始初始化项目...');
-    const result = await projectPool.getClient(projectPath, options);
+    let result: { client: JdtLsClient; loadEvent?: ProjectLoadEvent };
+    try {
+      result = await projectPool.getClient(projectPath, options);
+    } catch (error: any) {
+      daemonState.setProjectPhase(projectPath, 'error');
+      throw error;
+    }
     daemonState.setLastLoadEvent(result.loadEvent);
     if (result.loadEvent?.type !== 'reused') {
+      daemonState.setProjectPhase(projectPath, 'indexing');
       daemonState.updateProgress('indexing', 50, '等待 workspace 索引完成...');
       await waitForIndexing(projectPath);
     }
@@ -53,6 +65,8 @@ export async function initClient(projectPath: string, options: Partial<CLIOption
       scheduleBuildImportAsync(projectPath);
     }
     // 多项目模式下同步全局状态，确保 isClientReady() / getLibraryLocator() 可用
+    // KNOWN-LIMITATION: setClient 覆盖全局 client 引用，可能影响 getLibraryLocator()
+    // 的 fetcher 闭包在并发请求时的路由正确性。详见 daemonStateManager.getLibraryLocator()。
     daemonState.setClient(result.client);
     daemonState.setCurrentProject(projectPath);
     daemonState.setClientReady(true);
