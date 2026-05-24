@@ -277,6 +277,118 @@ export class JdtLsClient {
   }
 
   /**
+   * 获取文件诊断信息（编译错误/警告）
+   */
+  async getDiagnostics(filePath: string): Promise<any[]> {
+    return this.connectionManager.getDiagnostics(filePath);
+  }
+
+  /**
+   * 获取文件语义 Token
+   */
+  async getSemanticTokens(filePath: string): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getSemanticTokens(filePath);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  /**
+   * 语义重命名 - 返回 WorkspaceEdit
+   */
+  async getRename(filePath: string, line: number, col: number, newName: string): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getRename(filePath, line, col, newName);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  async getInlayHint(filePath: string, line: number, col: number): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getInlayHint(filePath, line, col);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  async getCodeAction(filePath: string, line: number, col: number): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getCodeAction(filePath, line, col);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  async getDocumentHighlight(filePath: string, line: number, col: number): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getDocumentHighlight(filePath, line, col);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  async getCodeLens(filePath: string): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getCodeLens(filePath);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  async getCompletion(filePath: string, line: number, col: number): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getCompletion(filePath, line, col);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  async getSignatureHelp(filePath: string, line: number, col: number): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getSignatureHelp(filePath, line, col);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  async getDeclaration(filePath: string, line: number, col: number): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getDeclaration(filePath, line, col);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  async getFormatting(filePath: string): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getFormatting(filePath);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  async getPrepareRename(filePath: string, line: number, col: number): Promise<any> {
+    await this.openDocument(filePath);
+    try {
+      return await this.connectionManager.getPrepareRename(filePath, line, col);
+    } finally {
+      await this.closeDocument(filePath);
+    }
+  }
+
+  /**
    * 停止 JDT LS
    * @param gracefulTimeoutMs 优雅关闭等待时间（0 = 直接强杀）
    */
@@ -320,6 +432,20 @@ export class JdtLsClient {
    */
   setProgressNotificationHandler(handler: (params: any) => void): void {
     this.connectionManager.setProgressNotificationHandler(handler);
+  }
+
+  /**
+   * 获取服务器 capabilities（initialize 结果）
+   */
+  getServerCapabilities(): any {
+    return this.connectionManager.getServerCapabilities();
+  }
+
+  /**
+   * 获取语义令牌图例（tokenType 名称 + tokenModifier 名称）
+   */
+  getSemanticTokensLegend(): { tokenTypes: string[]; tokenModifiers: string[] } | null {
+    return this.connectionManager.getSemanticTokensLegend();
   }
 }
 

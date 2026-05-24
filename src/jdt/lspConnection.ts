@@ -31,6 +31,18 @@ import {
   CallHierarchyIncomingCallsRequest,
   CallHierarchyOutgoingCallsRequest,
   WorkspaceSymbolRequest,
+  SemanticTokensRequest,
+  PublishDiagnosticsNotification,
+  RenameRequest,
+  InlayHintRequest,
+  CodeActionRequest,
+  DocumentHighlightRequest,
+  CodeLensRequest,
+  CompletionRequest,
+  SignatureHelpRequest,
+  DeclarationRequest,
+  DocumentFormattingRequest,
+  PrepareRenameRequest,
 } from 'vscode-languageserver-protocol';
 import { CLIOptions } from '../core/types';
 
@@ -46,6 +58,8 @@ export class LspConnectionManager {
   private initialized = false;
   private options: CLIOptions;
   private progressHandler?: (params: any) => void;
+  private diagnosticsStore = new Map<string, any[]>();
+  private serverCapabilities: any = null;
 
   constructor(options: CLIOptions) {
     this.options = options;
@@ -80,6 +94,12 @@ export class LspConnectionManager {
       }
     });
 
+    // 拦截 textDocument/publishDiagnostics 用于收集诊断信息
+    this.connection.onNotification(PublishDiagnosticsNotification.type.method, (params: any) => {
+      const uri = params?.uri || '';
+      this.diagnosticsStore.set(uri, params?.diagnostics || []);
+    });
+
     return this.connection;
   }
 
@@ -106,6 +126,33 @@ export class LspConnectionManager {
           },
           implementation: { dynamicRegistration: true, linkSupport: true },
           hover: { dynamicRegistration: true, contentFormat: ['plaintext', 'markdown'] },
+          rename: { dynamicRegistration: true, prepareSupport: true },
+          semanticTokens: {
+            dynamicRegistration: true,
+            tokenTypes: [
+              'namespace', 'type', 'class', 'enum', 'interface',
+              'struct', 'typeParameter', 'parameter', 'variable',
+              'property', 'enumMember', 'event', 'function', 'method',
+              'macro', 'keyword', 'modifier', 'comment', 'string',
+              'number', 'regexp', 'operator', 'decorator',
+            ],
+            tokenModifiers: [
+              'declaration', 'definition', 'readonly', 'static',
+              'deprecated', 'abstract', 'async', 'modification',
+              'documentation', 'defaultLibrary',
+            ],
+            formats: ['relative'],
+            requests: { full: { delta: true }, range: true },
+          },
+          inlayHint: { dynamicRegistration: true },
+          codeAction: { dynamicRegistration: true },
+          documentHighlight: { dynamicRegistration: true },
+          codeLens: { dynamicRegistration: true },
+          completion: { dynamicRegistration: true },
+          signatureHelp: { dynamicRegistration: true },
+          declaration: { dynamicRegistration: true, linkSupport: true },
+          formatting: { dynamicRegistration: true },
+          prepareRename: { dynamicRegistration: true },
         },
         workspace: {
           workspaceFolders: true,
@@ -129,11 +176,13 @@ export class LspConnectionManager {
     };
 
     this.log('Sending initialize request...');
-    await this.connection.sendRequest(InitializeRequest.type.method, initParams);
+    const initResult: any = await this.connection.sendRequest(InitializeRequest.type.method, initParams);
+    this.serverCapabilities = initResult?.capabilities || null;
+    this.log('JDT LS capabilities received');
 
     // 发送 initialized 通知
     await this.connection.sendNotification(InitializedNotification.type.method);
-    
+
     this.initialized = true;
     this.log('JDT LS initialized');
   }
@@ -243,16 +292,28 @@ export class LspConnectionManager {
 
   /**
    * 获取类型定义
+   *
+   * 已知问题：JDT LS 1.58.0 对 textDocument/typeDefinition 返回不符合 JSON-RPC 2.0
+   * 规范的响应（有 id 但缺少 result/error 封装），vscode-jsonrpc 会拒绝该响应。
+   * 此处 catch 特定错误并返回空数组作为降级处理。
    */
   async getTypeDefinition(filePath: string, line: number, col: number) {
     if (!this.connection || !this.initialized) {
       throw new Error('Not initialized');
     }
 
-    return this.connection.sendRequest(TypeDefinitionRequest.type.method, {
-      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
-      position: { line: line - 1, character: col - 1 },
-    });
+    try {
+      return await this.connection.sendRequest(TypeDefinitionRequest.type.method, {
+        textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+        position: { line: line - 1, character: col - 1 },
+      });
+    } catch (e: any) {
+      if (e?.message?.includes('neither a result nor an error')) {
+        this.log('textDocument/typeDefinition: JDT LS returned malformed JSON-RPC response, returning empty array');
+        return [];
+      }
+      throw e;
+    }
   }
 
   /**
@@ -335,6 +396,169 @@ export class LspConnectionManager {
     }
     const result = await this.connection.sendRequest<string>('java/classFileContents', { uri });
     return typeof result === 'string' ? result : '';
+  }
+
+  /**
+   * 获取文件诊断信息（编译错误/警告）
+   *
+   * JDT LS 通过 textDocument/publishDiagnostics 通知推送诊断，
+   * 因此需要先打开文档，等待服务器推送，再收集结果。
+   */
+  async getDiagnostics(filePath: string): Promise<any[]> {
+    if (!this.connection || !this.initialized) {
+      throw new Error('Not initialized');
+    }
+
+    const uri = `file://${filePath.replace(/\\/g, '/')}`;
+
+    // 清除旧诊断
+    this.diagnosticsStore.delete(uri);
+
+    // 打开文档触发服务器推送诊断
+    const fs = await import('fs');
+    const content = fs.readFileSync(filePath, 'utf-8');
+    await this.connection.sendNotification(DidOpenTextDocumentNotification.type.method, {
+      textDocument: { uri, languageId: 'java', version: 1, text: content },
+    });
+
+    // 等待诊断推送（最多等 5 秒）
+    const startTime = Date.now();
+    const maxWaitMs = 5000;
+    const pollIntervalMs = 200;
+    while (Date.now() - startTime < maxWaitMs) {
+      const diags = this.diagnosticsStore.get(uri);
+      if (diags !== undefined) {
+        // 关闭文档
+        await this.connection.sendNotification(DidCloseTextDocumentNotification.type.method, {
+          textDocument: { uri },
+        });
+        return diags;
+      }
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+    }
+
+    // 超时：关闭文档，返回空数组
+    try {
+      await this.connection.sendNotification(DidCloseTextDocumentNotification.type.method, {
+        textDocument: { uri },
+      });
+    } catch { /* ignore */ }
+    return [];
+  }
+
+  /**
+   * 获取文件语义 Token（精确类型标注）
+   */
+  async getSemanticTokens(filePath: string): Promise<any> {
+    if (!this.connection || !this.initialized) {
+      throw new Error('Not initialized');
+    }
+
+    const result = await this.connection.sendRequest(SemanticTokensRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+    });
+    return result;
+  }
+
+  /**
+   * 语义重命名 - 返回 WorkspaceEdit
+   */
+  async getRename(filePath: string, line: number, col: number, newName: string): Promise<any> {
+    if (!this.connection || !this.initialized) {
+      throw new Error('Not initialized');
+    }
+
+    return this.connection.sendRequest(RenameRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+      position: { line: line - 1, character: col - 1 },
+      newName,
+    });
+  }
+
+  async getInlayHint(filePath: string, line: number, col: number): Promise<any> {
+    if (!this.connection || !this.initialized) throw new Error('Not initialized');
+    return this.connection.sendRequest(InlayHintRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+      range: { start: { line: line - 1, character: col - 1 }, end: { line: line - 1, character: col - 1 } },
+    });
+  }
+
+  async getCodeAction(filePath: string, line: number, col: number): Promise<any> {
+    if (!this.connection || !this.initialized) throw new Error('Not initialized');
+    return this.connection.sendRequest(CodeActionRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+      range: { start: { line: line - 1, character: col - 1 }, end: { line: line - 1, character: col - 1 } },
+      context: { diagnostics: [] },
+    });
+  }
+
+  async getDocumentHighlight(filePath: string, line: number, col: number): Promise<any> {
+    if (!this.connection || !this.initialized) throw new Error('Not initialized');
+    return this.connection.sendRequest(DocumentHighlightRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+      position: { line: line - 1, character: col - 1 },
+    });
+  }
+
+  async getCodeLens(filePath: string): Promise<any> {
+    if (!this.connection || !this.initialized) throw new Error('Not initialized');
+    return this.connection.sendRequest(CodeLensRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+    });
+  }
+
+  async getCompletion(filePath: string, line: number, col: number): Promise<any> {
+    if (!this.connection || !this.initialized) throw new Error('Not initialized');
+    return this.connection.sendRequest(CompletionRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+      position: { line: line - 1, character: col - 1 },
+    });
+  }
+
+  async getSignatureHelp(filePath: string, line: number, col: number): Promise<any> {
+    if (!this.connection || !this.initialized) throw new Error('Not initialized');
+    return this.connection.sendRequest(SignatureHelpRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+      position: { line: line - 1, character: col - 1 },
+    });
+  }
+
+  async getDeclaration(filePath: string, line: number, col: number): Promise<any> {
+    if (!this.connection || !this.initialized) throw new Error('Not initialized');
+    return this.connection.sendRequest(DeclarationRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+      position: { line: line - 1, character: col - 1 },
+    });
+  }
+
+  async getFormatting(filePath: string): Promise<any> {
+    if (!this.connection || !this.initialized) throw new Error('Not initialized');
+    return this.connection.sendRequest(DocumentFormattingRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+      options: { tabSize: 4, insertSpaces: true },
+    });
+  }
+
+  async getPrepareRename(filePath: string, line: number, col: number): Promise<any> {
+    if (!this.connection || !this.initialized) throw new Error('Not initialized');
+    return this.connection.sendRequest(PrepareRenameRequest.type.method, {
+      textDocument: { uri: `file://${filePath.replace(/\\/g, '/')}` },
+      position: { line: line - 1, character: col - 1 },
+    });
+  }
+
+  /**
+   * 获取服务器 capabilities（initialize 结果）
+   */
+  getServerCapabilities(): any {
+    return this.serverCapabilities;
+  }
+
+  /**
+   * 获取语义令牌图例（tokenType 名称 + tokenModifier 名称）
+   */
+  getSemanticTokensLegend(): { tokenTypes: string[]; tokenModifiers: string[] } | null {
+    return this.serverCapabilities?.semanticTokensProvider?.legend || null;
   }
 
   /**
