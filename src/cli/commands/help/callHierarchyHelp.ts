@@ -21,6 +21,7 @@ Options:
   --expand-depth <ids>      逗号分隔方法 ID，lazy 模式展开子调用
   --snapshot-path <path>    snapshot 模式输出路径
   --max-summary-depth <n>   summary 模式最大深度（默认 2）
+  --lifecycle               字段级读写追踪（callee 节点附带 fieldFlow）
   -h, --help                显示帮助
 
 Examples:
@@ -28,12 +29,19 @@ Examples:
   jls ch Service.java --method process --incoming
   jls ch Service.java --method process --mode summary
   jls ch Service.java --method process --mode snapshot --snapshot-path ./out
+  jls ch OrderConverter.java --method entityToDto --lifecycle
 
 Modes:
   legacy    完整遍历调用链返回所有结果
   lazy      分批返回，通过 cursor 继续查询
   summary   仅返回摘要和统计
   snapshot  生成 HTML 可视化调用图
+
+Lifecycle mode (--lifecycle, 仅 legacy 模式):
+  每个 callee 节点新增 fieldFlow 字段:
+  - fieldFlow.reads[]:  该 callee 方法内部读取的字段，格式 "ClassName.fieldName"
+  - fieldFlow.writes[]: 该 callee 方法内部写入的字段，格式 "ClassName.fieldName"
+  信息来源: 解析方法体内 getter/setter 调用 + 方法签名参数的变量→类型映射
 
 On ambiguity:
   多个符号匹配时，使用 --index 0/1/2 选择。
