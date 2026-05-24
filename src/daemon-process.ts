@@ -41,11 +41,17 @@ const eagerInit = process.env.JLS_DAEMON_EAGER === 'true';
 const projectPath = process.env.JLS_DAEMON_PROJECT || undefined;
 const jdtlsPath = process.env.JLS_DAEMON_JDTLS || undefined;
 
+// JRE 下载进度通过 IPC 上报父进程
+function onJreProgress(msg: { type: string; data: any }): void {
+  safeIpcSend(msg);
+}
+
 // 启动守护进程
 startDaemon(port, {
   eagerInit,
   projectPath,
   jdtlsPath,
+  onJreProgress,
 }).catch((err) => {
   console.error('❌ 守护进程启动异常:', err.message || err);
   safeIpcSend({

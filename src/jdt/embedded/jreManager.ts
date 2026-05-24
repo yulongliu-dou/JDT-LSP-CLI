@@ -35,13 +35,21 @@ export class EmbeddedJreManager {
 
   /**
    * 确保有可用的 JRE（主入口）
+   *
+   * @param interactive  交互模式：用户手动选择下载源
+   * @param onProgress   进度回调，供 daemon 通过 IPC 上报（可选）
    */
-  async ensure(interactive: boolean = false): Promise<JreInfo> {
+  async ensure(
+    interactive: boolean = false,
+    onProgress?: (msg: { type: string; data: any }) => void,
+  ): Promise<JreInfo> {
     // 1. 检查本地缓存
     const cachedJres = this.listCachedJres();
     if (cachedJres.length > 0) {
       const jre = cachedJres[0];
-      console.log(`✓ 使用内嵌 JRE: ${jre.version} (${jre.path})`);
+      const msg = `✓ 使用内嵌 JRE: ${jre.version} (${jre.path})`;
+      console.log(msg);
+      onProgress?.({ type: 'jre-progress', data: { stage: 'cached', message: msg, version: jre.version } });
       return { ...jre, source: 'embedded' };
     }
 
@@ -51,6 +59,7 @@ export class EmbeddedJreManager {
     console.log(`   未找到内嵌 JRE，正在并发探测可用下载源`);
     console.log(`   平台: ${platform.os} ${platform.arch}`);
     console.log('');
+    onProgress?.({ type: 'jre-progress', data: { stage: 'probing', message: '正在探测可用下载源...' } });
 
     // 3. 并发探测所有源
     const results = await probeAllSources(platform.os, platform.arch);
@@ -83,8 +92,8 @@ export class EmbeddedJreManager {
           console.log(`   ${selected.source.label} 下载失败: ${err.message}`);
         }
       } else {
-        // 自动模式：并发下载所有可达源，取最先完成的
-        const result = await this.downloadRace(reachable, platform.ext);
+        // 自动模式：按探测延迟+优先级顺序下载，失败/过慢则自动切换下一个
+        const result = await this.downloadSequential(reachable, platform.ext, onProgress);
         if (result) return result;
       }
     }
@@ -94,19 +103,78 @@ export class EmbeddedJreManager {
     return this.handleFallback(JRE_TARGET_VERSION);
   }
 
+  // 速度监控阈值
+  private static readonly MIN_SPEED_BPS = 200 * 1024; // 200 KB/s
+  private static readonly SLOW_DURATION_MS = 15000;   // 持续低于阈值 15s 则中止
+
   /**
-   * 尝试下载并安装 JRE，成功返回 JreInfo，失败返回 null
+   * 尝试下载并安装 JRE，成功返回 JreInfo，失败抛出异常
    */
-  private async tryDownloadJre(asset: JreAsset, ext: string, sourceLabel: string, tmpFile?: string, signal?: AbortSignal): Promise<JreInfo> {
+  private async tryDownloadJre(
+    asset: JreAsset,
+    ext: string,
+    sourceLabel: string,
+    tmpFile?: string,
+    signal?: AbortSignal,
+    onProgress?: (msg: { type: string; data: any }) => void,
+  ): Promise<JreInfo> {
     const destDir = path.join(this.jreStorageDir, asset.version);
     const javaExe = path.join(destDir, 'bin',
       os.platform() === 'win32' ? 'java.exe' : 'java');
     const downloadTmp = tmpFile || path.join(this.jreStorageDir, `jre-${asset.version}.${ext}`);
 
-    console.log(`   来源: ${sourceLabel}`);
-    await downloadFileWithRetry(asset.downloadUrl, downloadTmp, signal);
+    // 速度监控：若速度持续低于阈值超过时限则抛出 SpeedTooSlow
+    const speedAc = new AbortController();
+    let slowSince: number | null = null;
+    let lastSpeedBps = 0;
 
-    if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    const onDownloadProgress = (state: DownloadState) => {
+      const { downloaded, lastDownloaded, lastUpdateTime } = state;
+      const now = Date.now();
+      const timeDiff = (now - lastUpdateTime) / 1000;
+      const byteDiff = downloaded - lastDownloaded;
+      lastSpeedBps = timeDiff > 0 ? (byteDiff / timeDiff) : 0;
+
+      if (lastSpeedBps < EmbeddedJreManager.MIN_SPEED_BPS && lastSpeedBps >= 0) {
+        if (slowSince === null) slowSince = now;
+        const slowDuration = now - slowSince;
+        if (slowDuration >= EmbeddedJreManager.SLOW_DURATION_MS) {
+          const speedKB = (lastSpeedBps / 1024).toFixed(0);
+          speedAc.abort(`速度持续 < 200KB/s (当前 ${speedKB} KB/s，已持续 ${Math.round(slowDuration / 1000)}s)`);
+          return;
+        }
+      } else {
+        slowSince = null;
+      }
+
+      // 上报进度
+      if (onProgress) {
+        if (state.total > 0) {
+          const pct = Math.round((downloaded / state.total) * 100);
+          const speedKB = (lastSpeedBps / 1024).toFixed(0);
+          onProgress({
+            type: 'jre-progress',
+            data: { stage: 'download-progress', pct, speedKB, source: sourceLabel },
+          });
+        }
+      } else {
+        process.stdout.write(renderProgress(state));
+      }
+    };
+
+    // 合并外部 signal 和速度监控 signal
+    const combinedSignal = mergeAbortSignals(signal, speedAc.signal);
+
+    console.log(`   来源: ${sourceLabel}`);
+    try {
+      await downloadFileWithRetry(asset.downloadUrl, downloadTmp, combinedSignal, DOWNLOAD_RETRY_MAX, onDownloadProgress);
+    } catch (err: any) {
+      // 仅 AbortError 才可能是速度监控触发；网络错误等直接透传，避免误判
+      if (err.name === 'AbortError' && speedAc.signal.aborted && !signal?.aborted) {
+        throw Object.assign(new Error(speedAc.signal.reason || '下载速度过慢'), { name: 'SpeedTooSlow' });
+      }
+      throw err;
+    }
 
     console.log('  正在校验 SHA256...');
     const valid = await this.verifyChecksum(downloadTmp, asset.checksum);
@@ -149,56 +217,53 @@ export class EmbeddedJreManager {
   }
 
   /**
-   * 并发下载竞速：同时从所有可达源下载，取最先完成的
-   * 其他未完成的下载会被中止并清理临时文件
+   * 顺序下载：按探测延迟+优先级排序，从最快的源开始逐个尝试
+   * 若某源下载过慢（速度持续 < 200KB/s 超过 15s）则中止并切换下一个
    */
-  private async downloadRace(reachable: JreProbeResult[], ext: string): Promise<JreInfo | null> {
-    const ac = new AbortController();
-    const labels = reachable.map(r => r.source.label).join(', ');
-    console.log(`⬇ 并发下载 (${reachable.length} 个源): ${labels}`);
+  private async downloadSequential(
+    reachable: JreProbeResult[],
+    ext: string,
+    onProgress?: (msg: { type: string; data: any }) => void,
+  ): Promise<JreInfo | null> {
+    // 按优先级 + 探测延迟排序
+    const sorted = [...reachable].sort((a, b) => {
+      if (a.source.priority !== b.source.priority) return a.source.priority - b.source.priority;
+      return a.latency - b.latency;
+    });
 
-    const tempFiles: string[] = [];
-    const seen = new Set<string>(); // 防止同版本多个源产生文件名冲突
+    const labels = sorted.map(r => r.source.label).join(' → ');
+    console.log(`⬇ 顺序下载 (${sorted.length} 个源): ${labels}`);
+    onProgress?.({ type: 'jre-progress', data: { stage: 'downloading', message: `顺序下载: ${labels}`, sources: sorted.length } });
 
-    const tasks = reachable.map(async (r) => {
+    for (let i = 0; i < sorted.length; i++) {
+      const r = sorted[i];
       let asset = r.asset!;
       // USTC checksum 是 URL，需要先获取
       if (r.source.key === 'ustc' && typeof asset.checksum === 'string' && asset.checksum.startsWith('http')) {
         asset = { ...asset, checksum: await fetchChecksumFromUrl(asset.checksum).catch(() => '') };
       }
 
-      // 保证临时文件名唯一
-      let suffix = r.source.key;
-      let counter = 0;
-      while (seen.has(suffix)) suffix = `${r.source.key}-${++counter}`;
-      seen.add(suffix);
+      const position = `[${i + 1}/${sorted.length}]`;
+      console.log(`   ${position} 尝试: ${r.source.label}`);
+      onProgress?.({ type: 'jre-progress', data: { stage: 'downloading', message: `尝试 ${r.source.label} ${position}`, source: r.source.label, sourceIndex: i + 1, totalSources: sorted.length } });
 
-      const tmpFile = path.join(this.jreStorageDir, `jre-${asset.version}-${suffix}.${ext}`);
-      tempFiles.push(tmpFile);
-
-      return this.tryDownloadJre(asset, ext, r.source.label, tmpFile, ac.signal);
-    });
-
-    try {
-      const winner = await Promise.any(tasks);
-      return winner;
-    } catch (e) {
-      // AggregateError: 全部失败
-      if (e instanceof AggregateError) {
-        for (const err of e.errors) {
-          if (err && typeof err === 'object' && 'message' in err && (err as any).name !== 'AbortError') {
-            console.log(`   下载失败: ${(err as any).message}`);
-          }
+      try {
+        const result = await this.tryDownloadJre(asset, ext, r.source.label, undefined, undefined, onProgress);
+        console.log(`   ✓ ${r.source.label} 下载完成`);
+        return result;
+      } catch (err: any) {
+        if (err.name === 'SpeedTooSlow') {
+          console.log(`   ⚠ ${r.source.label} 下载过慢 (${err.message})，切换下一个源`);
+          onProgress?.({ type: 'jre-progress', data: { stage: 'switching', message: `${r.source.label} 过慢，切换下一个源`, source: r.source.label, reason: err.message } });
+        } else if (err.name === 'AbortError') {
+          console.log(`   ⚠ ${r.source.label} 下载已中止`);
+        } else {
+          console.log(`   ✗ ${r.source.label} 下载失败: ${err.message}`);
         }
       }
-      return null;
-    } finally {
-      ac.abort();
-      // 清理所有临时文件（成功的已在 tryDownloadJre 中删除）
-      for (const f of tempFiles) {
-        try { fs.unlinkSync(f); } catch { /* ignore */ }
-      }
     }
+
+    return null;
   }
 
   /**
@@ -559,6 +624,26 @@ function promptUserSelect(results: JreProbeResult[]): Promise<JreProbeResult> {
 }
 
 /**
+ * 合并多个 AbortSignal，任一 abort 则合并后的 signal 也 abort
+ */
+function mergeAbortSignals(...signals: (AbortSignal | undefined)[]): AbortSignal {
+  const valid = signals.filter((s): s is AbortSignal => !!s);
+  if (valid.length === 0) return new AbortController().signal;
+  if (valid.length === 1) return valid[0];
+
+  const ac = new AbortController();
+  const onAbort = () => {
+    const reasons = valid.filter(s => s.aborted).map(s => s.reason);
+    ac.abort(reasons[0] || 'Aborted');
+  };
+  for (const s of valid) {
+    if (s.aborted) { onAbort(); break; }
+    s.addEventListener('abort', onAbort, { once: true });
+  }
+  return ac.signal;
+}
+
+/**
  * 带超时的 Promise 包装
  */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -847,7 +932,7 @@ function renderProgress(state: DownloadState): string {
 /**
  * 带重试的下载，仅网络错误和 5xx 重试
  */
-async function downloadFileWithRetry(url: string, dest: string, signal?: AbortSignal, maxRetries: number = DOWNLOAD_RETRY_MAX): Promise<void> {
+async function downloadFileWithRetry(url: string, dest: string, signal?: AbortSignal, maxRetries: number = DOWNLOAD_RETRY_MAX, onProgress?: (state: DownloadState) => void): Promise<void> {
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -858,7 +943,7 @@ async function downloadFileWithRetry(url: string, dest: string, signal?: AbortSi
         await new Promise(r => setTimeout(r, delay));
         try { fs.unlinkSync(dest); } catch { /* ignore */ }
       }
-      await downloadFile(url, dest, signal);
+      await downloadFile(url, dest, signal, onProgress);
       return;
     } catch (err: any) {
       lastErr = err;
