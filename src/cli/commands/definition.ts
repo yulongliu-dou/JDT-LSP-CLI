@@ -4,16 +4,14 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand } from '../utils/positionResolver';
+import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { resolveSymbol, buildSymbolQuery } from '../../symbolResolver';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
-import { initDirectModeRewriter, rewriteDirectLocations } from '../utils/directModeRewriter';
+import { initDirectModeRewriter, rewriteDirectLocations, rewriteDirectLocation } from '../utils/directModeRewriter';
 
 import { DEFINITION_HELP } from './help/definitionHelp';
-
-// ── Command ───────────────────────────────────────────────────────────────────
 
 export function registerDefinitionCommand(program: Command) {
   let definitionCmd = program
@@ -40,7 +38,6 @@ export function registerDefinitionCommand(program: Command) {
   definitionCmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
 
-    // 防呆：校验参数合法性
     const validationError = validateFileSymbolCommand(file, cmdOptions, opts, 'def');
     if (validationError) {
       outputResult(validationError, undefined, opts.jsonCompact, opts.output);
@@ -49,7 +46,6 @@ export function registerDefinitionCommand(program: Command) {
 
     const projectPath = path.resolve(opts.project);
     
-    // 解析位置（支持符号模式）
     const posResult = await getPosition(file, cmdOptions, opts);
     if ('success' in posResult) {
       outputResult(posResult, undefined, opts.jsonCompact, opts.output);
@@ -94,12 +90,18 @@ export function registerDefinitionCommand(program: Command) {
                 }
               }
             } catch {
-              // 文档符号定位失败，继续使用原位置
+              console.warn('WARNING: Symbol re-resolution failed in target file, using workspace/symbol position. Result may be imprecise.');
             }
           }
           const defs = await client.getDefinition(filePath, finalLine, finalCol);
-          const arr = Array.isArray(defs) ? defs : defs ? [defs] : [];
-          return rewriteDirectLocations(arr);
+          if (defs) {
+            if (defs.uri && defs.range) {
+              return rewriteDirectLocation(defs);
+            } else if (Array.isArray(defs)) {
+              return rewriteDirectLocations(defs);
+            }
+          }
+          return defs;
         } finally {
           if (client) await client.stop();
         }
@@ -110,16 +112,3 @@ export function registerDefinitionCommand(program: Command) {
   });
 }
 
-async function createDirectClient(options: any): Promise<JdtLsClient> {
-  const { JdtLsClient } = require('../../jdtClient');
-  const client = new JdtLsClient({
-    projectPath: path.resolve(options.project),
-    jdtlsPath: options.jdtlsPath,
-    dataDir: options.dataDir,
-    timeout: parseInt(options.timeout, 10),
-    verbose: options.verbose,
-  });
-
-  await client.start();
-  return client;
-}

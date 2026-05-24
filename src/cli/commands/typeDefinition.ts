@@ -75,9 +75,17 @@ export function registerTypeDefinitionCommand(program: Command) {
           client = await createDirectClient(opts);
           await initDirectModeRewriter(client, projectPath);
           const result = await client.getTypeDefinition(filePath, parseInt(resolvedLine), parseInt(resolvedCol), explainEmpty);
-          const locations = Array.isArray(result) ? result : [];
-          const rewritten = await rewriteDirectLocations(locations);
-          return { locations: rewritten, count: rewritten.length };
+          // 对齐 daemon handleTypeDefinition 的格式保留逻辑
+          if (!result) return { locations: [], count: 0 };
+          if (result.locations && Array.isArray(result.locations)) {
+            result.locations = await rewriteDirectLocations(result.locations);
+            return result;
+          }
+          if (Array.isArray(result)) {
+            const rewritten = await rewriteDirectLocations(result);
+            return { locations: rewritten, count: rewritten.length };
+          }
+          return result;
         } finally {
           if (client) await client.stop();
         }

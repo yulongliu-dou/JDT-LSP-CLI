@@ -4,7 +4,7 @@
 
 // ========== 版本信息 ==========
 // 注意：版本号只需在此处修改，会自动同步到CLI和Daemon
-export const PACKAGE_VERSION = '2.3.2';
+export const PACKAGE_VERSION = '2.4.0';
 
 // 守护进程默认配置
 export const DEFAULT_DAEMON_PORT = 9876;

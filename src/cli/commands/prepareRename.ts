@@ -1,5 +1,5 @@
 /**
- * Rename 命令 - 语义级重命名
+ * PrepareRename 命令 - 检查位置是否可重命名
  */
 
 import { Command } from 'commander';
@@ -7,18 +7,17 @@ import * as path from 'path';
 import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
-import { validateRenameCommand } from '../utils/paramValidator';
-import { flattenWorkspaceEdit } from '../../core/utils/workspaceEdit';
+import { validateFileSymbolCommand } from '../utils/paramValidator';
 
-import { RENAME_HELP } from './help/renameHelp';
+import { PREPARE_RENAME_HELP } from './help/prepareRenameHelp';
 
-export function registerRenameCommand(program: Command) {
-  let renameCmd = program
-    .command('rename <file>')
-    .description('语义级重命名：返回所有需要修改的位置（WorkspaceEdit），不遗漏、不误改字符串。')
-    .configureHelp({ formatHelp: () => RENAME_HELP });
+export function registerPrepareRenameCommand(program: Command) {
+  let cmd = program
+    .command('prepare-rename [file]')
+    .alias('preren')
+    .description('检查指定位置是否可以重命名，返回可重命名的符号范围。')
+    .configureHelp({ formatHelp: () => PREPARE_RENAME_HELP });
 
-  // 添加符号定位选项
   const symbolOptions = [
     { flags: '--method <name>', desc: 'Method name to locate (auto-resolve position)' },
     { flags: '--symbol <name>', desc: 'Symbol name to locate (auto-resolve position)' },
@@ -26,18 +25,15 @@ export function registerRenameCommand(program: Command) {
     { flags: '--signature <sig>', desc: 'Method signature for overloads, e.g., "(String, int)"' },
     { flags: '--index <n>', desc: 'Index for multiple matches (0-based)' },
     { flags: '--kind <type>', desc: 'Symbol kind: Method, Field, Class, Interface' },
-    { flags: '--global', desc: 'Global search (requires --symbol AND --kind)' },
-    { flags: '--new-name <name>', desc: 'New name for the symbol (required)' },
+    { flags: '--global', desc: 'Global search (requires --symbol AND --kind, JDT LS limitation)' },
   ];
 
-  for (const opt of symbolOptions) {
-    renameCmd = renameCmd.option(opt.flags, opt.desc);
-  }
+  for (const opt of symbolOptions) { cmd = cmd.option(opt.flags, opt.desc); }
 
-  renameCmd.action(async (file: string, cmdOptions: any) => {
+  cmd.action(async (file: string, cmdOptions: any) => {
     const opts = program.opts();
 
-    const validationError = validateRenameCommand(file, cmdOptions, opts);
+    const validationError = validateFileSymbolCommand(file, cmdOptions, opts, 'preren');
     if (validationError) {
       outputResult(validationError, undefined, opts.jsonCompact, opts.output);
       return;
@@ -52,35 +48,31 @@ export function registerRenameCommand(program: Command) {
     }
 
     const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
-    const newName = cmdOptions.newName;
 
     await executeCommand(
-      '/rename',
+      '/prepare-rename',
       {
         project: projectPath,
         file: filePath,
         line: resolvedLine,
         col: resolvedCol,
-        newName,
-        symbol: cmdOptions.symbol,
-        kind: cmdOptions.kind,
-        index: cmdOptions.index,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
       async () => {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          const workspaceEdit = await client.getRename(filePath, parseInt(resolvedLine), parseInt(resolvedCol), newName);
-          // 扁平化 WorkspaceEdit → { changes: [...], count }
-          return flattenWorkspaceEdit(workspaceEdit);
+          const range = await client.getPrepareRename(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
+          if (range && range.start && range.end) {
+            return { range, valid: true };
+          }
+          return { valid: false, reason: 'Cannot rename at this position' };
         } finally {
           if (client) await client.stop();
         }
       },
       opts,
-      'rename'
+      'prepareRename'
     );
   });
 }
-

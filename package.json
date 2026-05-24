@@ -1,6 +1,6 @@
 {
   "name": "jdt-lsp-cli",
-  "version": "2.3.2",
+  "version": "2.4.0",
   "description": "CLI tool for Java LSP operations, enabling AI agents to call Java language features from the command line",
   "main": "dist/index.js",
   "bin": {
@@ -22,7 +22,8 @@
     "test:e2e": "jest test/e2e --runInBand",
     "test:mybatis": "jest test/e2e/scenarios/mybatis --runInBand",
     "test:clear-cache": "jest --clearCache",
-    "test:cache-status": "node -e \"console.log('Jest cache dir:', require('os').tmpdir() + '/jest_0')\""
+    "test:cache-status": "node -e \"console.log('Jest cache dir:', require('os').tmpdir() + '/jest_0')\"",
+    "explore": "npx ts-node --project scripts/explore/tsconfig.json scripts/explore/explore-all.ts"
   },
   "keywords": [
     "java",

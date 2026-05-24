@@ -42,6 +42,16 @@ export async function rewriteDirectLocations(
 }
 
 /**
+ * 对单个 Location 执行 URI 重写（直接模式）
+ */
+export async function rewriteDirectLocation(
+  location: any | null | undefined
+): Promise<any> {
+  if (!location) return location;
+  return rewriteLocation(location);
+}
+
+/**
  * 对 workspace/symbol 返回的 SymbolInformation[] 执行 URI 重写
  * SymbolInformation 结构: { name, kind, location: { uri, range }, containerName? }
  */

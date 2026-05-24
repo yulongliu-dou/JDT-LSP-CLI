@@ -15,6 +15,18 @@ import { registerWorkspaceSymbolsCommand } from './commands/workspaceSearch';
 import { registerTypeDefinitionCommand } from './commands/typeDefinition';
 import { registerImplementationsCommand } from './commands/implementations';
 import { registerHoverCommand } from './commands/hover';
+import { registerDiagnosticsCommand } from './commands/diagnostics';
+import { registerRenameCommand } from './commands/rename';
+import { registerSemanticTokensCommand } from './commands/semanticTokens';
+import { registerInlayHintCommand } from './commands/inlayHint';
+import { registerCodeActionCommand } from './commands/codeAction';
+import { registerDocumentHighlightCommand } from './commands/documentHighlight';
+import { registerCodeLensCommand } from './commands/codeLens';
+import { registerCompletionCommand } from './commands/completion';
+import { registerSignatureHelpCommand } from './commands/signatureHelp';
+import { registerDeclarationCommand } from './commands/declaration';
+import { registerFormattingCommand } from './commands/formatting';
+import { registerPrepareRenameCommand } from './commands/prepareRename';
 import { registerCache } from './commands/cache';
 import { registerJre } from './commands/jre';
 import { registerJdt } from './commands/jdt';
@@ -50,6 +62,18 @@ export function registerAllCommands(program: Command): void {
   registerTypeDefinitionCommand(program);
   registerImplementationsCommand(program);
   registerHoverCommand(program);
+  registerDiagnosticsCommand(program);
+  registerRenameCommand(program);
+  registerSemanticTokensCommand(program);
+  registerInlayHintCommand(program);
+  registerCodeActionCommand(program);
+  registerDocumentHighlightCommand(program);
+  registerCodeLensCommand(program);
+  registerCompletionCommand(program);
+  registerSignatureHelpCommand(program);
+  registerDeclarationCommand(program);
+  registerFormattingCommand(program);
+  registerPrepareRenameCommand(program);
 
   // 注册 cache 命令（SP04）
   registerCache(program);

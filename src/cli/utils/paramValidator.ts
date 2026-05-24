@@ -420,3 +420,90 @@ export function validateCacheWarmCommand(cmdOptions: {
 }): CLIValidationErrorOutput | null {
   return toCLIError(checkPositiveInteger(cmdOptions.timeout, '--timeout', 1000));
 }
+
+/** formatting <file> */
+export function validateFormattingCommand(
+  file: string,
+  opts: GlobalOpts
+): CLIValidationErrorOutput | null {
+  if (!file) {
+    return buildCLIError(
+      'MISSING_PARAM',
+      '缺少文件路径',
+      '请提供需要格式化的 Java 文件路径',
+      'jls fmt <文件路径>',
+      ['jls fmt src/main/java/com/example/Service.java']
+    );
+  }
+  return toCLIError(checkFileExists(file, opts.project));
+}
+
+/** code-lens <file> */
+export function validateCodeLensCommand(
+  file: string,
+  opts: GlobalOpts
+): CLIValidationErrorOutput | null {
+  if (!file) {
+    return buildCLIError('MISSING_PARAM', '缺少文件路径', '请提供 Java 文件路径', 'jls lens <文件路径>');
+  }
+  return toCLIError(checkFileExists(file, opts.project));
+}
+
+/** diagnostics <file> */
+export function validateDiagnosticsCommand(
+  file: string,
+  opts: GlobalOpts
+): CLIValidationErrorOutput | null {
+  if (!file) {
+    return buildCLIError(
+      'MISSING_PARAM',
+      '缺少文件路径',
+      '请提供需要诊断的 Java 文件路径',
+      'jls diag <文件路径>',
+      ['jls diag src/main/java/com/example/Service.java']
+    );
+  }
+  return toCLIError(checkFileExists(file, opts.project));
+}
+
+/** rename <file> */
+export function validateRenameCommand(
+  file: string,
+  cmdOptions: {
+    newName?: string;
+    global?: boolean;
+    symbol?: string;
+    method?: string;
+    kind?: string;
+    index?: string;
+  },
+  opts: GlobalOpts
+): CLIValidationErrorOutput | null {
+  // --new-name 必填
+  if (!cmdOptions.newName) {
+    return buildCLIError(
+      'MISSING_PARAM',
+      '缺少 --new-name 参数',
+      '语义重命名必须指定新名称',
+      'jls rename <文件路径> --symbol <名称> --new-name <新名称>',
+      [
+        'jls rename Service.java --symbol oldMethod --new-name newMethod',
+        'jls rename Service.java --symbol myField --kind Field --new-name renamedField',
+      ]
+    );
+  }
+
+  // 复用文件符号命令通用校验
+  return validateFileSymbolCommand(
+    file,
+    {
+      global: cmdOptions.global,
+      symbol: cmdOptions.symbol,
+      method: cmdOptions.method,
+      kind: cmdOptions.kind,
+      index: cmdOptions.index,
+    },
+    opts,
+    'rename'
+  );
+}

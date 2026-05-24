@@ -1,5 +1,5 @@
 /**
- * Completion 命令 - 获取补全候选列表
+ * Code Action 命令 - 获取可用的快速修复和重构操作列表
  */
 
 import { Command } from 'commander';
@@ -8,15 +8,14 @@ import { getPosition, executeCommand, createDirectClient } from '../utils/positi
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
-import { CompletionItemKindMap } from '../../core/types';
 
-import { COMPLETION_HELP } from './help/completionHelp';
+import { CODE_ACTION_HELP } from './help/codeActionHelp';
 
-export function registerCompletionCommand(program: Command) {
+export function registerCodeActionCommand(program: Command) {
   let cmd = program
-    .command('completion [file]')
-    .alias('complete')
-    .description('获取指定位置的补全候选列表（方法、字段、类名）。');
+    .command('code-action [file]')
+    .alias('action')
+    .description('获取可用的快速修复和重构操作列表（import、提取方法、实现接口等）。');
 
   const symbolOptions = [
     { flags: '--method <name>', desc: 'Method name to locate' },
@@ -30,11 +29,11 @@ export function registerCompletionCommand(program: Command) {
 
   for (const opt of symbolOptions) { cmd = cmd.option(opt.flags, opt.desc); }
 
-  cmd.configureHelp({ formatHelp: () => COMPLETION_HELP })
+  cmd.configureHelp({ formatHelp: () => CODE_ACTION_HELP })
     .action(async (file: string, cmdOptions: any) => {
       const opts = program.opts();
 
-      const validationError = validateFileSymbolCommand(file, cmdOptions, opts, 'complete');
+      const validationError = validateFileSymbolCommand(file, cmdOptions, opts, 'action');
       if (validationError) { outputResult(validationError, undefined, opts.jsonCompact, opts.output); return; }
 
       const projectPath = path.resolve(opts.project);
@@ -43,26 +42,16 @@ export function registerCompletionCommand(program: Command) {
 
       const { filePath: fp, line, col } = posResult;
 
-      await executeCommand('/completion', {
+      await executeCommand('/code-action', {
         project: projectPath, file: fp, line, col,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       }, async () => {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          const result = await client.getCompletion(fp, parseInt(line), parseInt(col));
-          const items = result?.items || result || [];
-          const itemsArray = Array.isArray(items) ? items : [];
-          const mapped = itemsArray.map((item: any) => ({
-            ...item,
-            kind: CompletionItemKindMap[item.kind] || item.kind,
-          }));
-          return {
-            items: mapped,
-            count: mapped.length,
-            isIncomplete: result?.isIncomplete ?? false,
-          };
+          const actions = await client.getCodeAction(fp, parseInt(line), parseInt(col));
+          return { actions, count: Array.isArray(actions) ? actions.length : 0 };
         } finally { if (client) await client.stop(); }
-      }, opts, 'completion');
+      }, opts, 'codeAction');
     });
 }

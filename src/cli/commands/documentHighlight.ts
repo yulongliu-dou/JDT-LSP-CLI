@@ -4,7 +4,7 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand } from '../utils/positionResolver';
+import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
@@ -58,14 +58,4 @@ export function registerDocumentHighlightCommand(program: Command) {
         } finally { if (client) await client.stop(); }
       }, opts, 'documentHighlight');
     });
-}
-
-async function createDirectClient(options: any): Promise<JdtLsClient> {
-  const { JdtLsClient } = require('../../jdtClient');
-  const client = new JdtLsClient({
-    projectPath: path.resolve(options.project), jdtlsPath: options.jdtlsPath,
-    dataDir: options.dataDir, timeout: parseInt(options.timeout, 10), verbose: options.verbose,
-  });
-  await client.start();
-  return client;
 }

@@ -1,5 +1,5 @@
 /**
- * Completion 命令 - 获取补全候选列表
+ * Inlay Hint 命令 - 获取编译器推断的类型信息
  */
 
 import { Command } from 'commander';
@@ -8,15 +8,14 @@ import { getPosition, executeCommand, createDirectClient } from '../utils/positi
 import { outputResult } from '../utils/outputHandler';
 import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
-import { CompletionItemKindMap } from '../../core/types';
 
-import { COMPLETION_HELP } from './help/completionHelp';
+import { INLAY_HINT_HELP } from './help/inlayHintHelp';
 
-export function registerCompletionCommand(program: Command) {
+export function registerInlayHintCommand(program: Command) {
   let cmd = program
-    .command('completion [file]')
-    .alias('complete')
-    .description('获取指定位置的补全候选列表（方法、字段、类名）。');
+    .command('inlay-hint [file]')
+    .alias('inlay')
+    .description('获取推断类型和参数名标注（var 类型、参数名等）。');
 
   const symbolOptions = [
     { flags: '--method <name>', desc: 'Method name to locate' },
@@ -30,11 +29,11 @@ export function registerCompletionCommand(program: Command) {
 
   for (const opt of symbolOptions) { cmd = cmd.option(opt.flags, opt.desc); }
 
-  cmd.configureHelp({ formatHelp: () => COMPLETION_HELP })
+  cmd.configureHelp({ formatHelp: () => INLAY_HINT_HELP })
     .action(async (file: string, cmdOptions: any) => {
       const opts = program.opts();
 
-      const validationError = validateFileSymbolCommand(file, cmdOptions, opts, 'complete');
+      const validationError = validateFileSymbolCommand(file, cmdOptions, opts, 'inlay');
       if (validationError) { outputResult(validationError, undefined, opts.jsonCompact, opts.output); return; }
 
       const projectPath = path.resolve(opts.project);
@@ -43,26 +42,16 @@ export function registerCompletionCommand(program: Command) {
 
       const { filePath: fp, line, col } = posResult;
 
-      await executeCommand('/completion', {
+      await executeCommand('/inlay-hint', {
         project: projectPath, file: fp, line, col,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       }, async () => {
         let client: JdtLsClient | null = null;
         try {
           client = await createDirectClient(opts);
-          const result = await client.getCompletion(fp, parseInt(line), parseInt(col));
-          const items = result?.items || result || [];
-          const itemsArray = Array.isArray(items) ? items : [];
-          const mapped = itemsArray.map((item: any) => ({
-            ...item,
-            kind: CompletionItemKindMap[item.kind] || item.kind,
-          }));
-          return {
-            items: mapped,
-            count: mapped.length,
-            isIncomplete: result?.isIncomplete ?? false,
-          };
+          const hints = await client.getInlayHint(fp, parseInt(line), parseInt(col));
+          return { hints, count: Array.isArray(hints) ? hints.length : 0 };
         } finally { if (client) await client.stop(); }
-      }, opts, 'completion');
+      }, opts, 'inlayHint');
     });
 }

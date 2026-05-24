@@ -1,0 +1,456 @@
+
+<h2 class="sr-only">Java LSP 协议功能清单：AI Agent CLI 接入价值分析，含功能分组、价值评级与组合命令建议</h2>
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); }
+
+.section { margin-bottom: 2rem; }
+.section-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px;
+}
+
+.feature-card {
+  background: var(--color-background-primary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-lg);
+  padding: 0.875rem 1rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.feature-card:hover { border-color: var(--color-border-secondary); }
+
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.card-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+}
+.card-cmd {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  background: var(--color-background-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.card-desc {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+.card-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.value-dots {
+  display: flex; gap: 3px;
+}
+.dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-border-secondary);
+}
+.dot.filled { background: #1D9E75; }
+.value-label {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.tag {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 500;
+  margin-right: 4px;
+  margin-top: 4px;
+}
+.tag-new { background: #E1F5EE; color: #0F6E56; }
+.tag-exists { background: #E6F1FB; color: #185FA5; }
+.tag-grep { background: #FAEEDA; color: #854F0B; }
+
+.combo-section { margin-top: 2rem; }
+.combo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px;
+}
+.combo-card {
+  background: var(--color-background-secondary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-lg);
+  padding: 0.875rem 1rem;
+}
+.combo-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  margin-bottom: 4px;
+}
+.combo-desc {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.combo-uses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.combo-tag {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: var(--color-background-primary);
+  border: 0.5px solid var(--color-border-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+}
+
+.legend {
+  display: flex; gap: 1.5rem; margin-bottom: 1.5rem; flex-wrap: wrap;
+}
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-secondary); }
+</style>
+
+<div style="padding: 1rem 0 2rem;">
+
+<div class="legend">
+  <div class="legend-item"><span class="tag tag-exists">已有</span> 已实现的命令</div>
+  <div class="legend-item"><span class="tag tag-new">待接入</span> 建议新增</div>
+  <div class="legend-item"><span class="tag tag-grep">解决grep痛点</span> 语义消歧</div>
+</div>
+
+<div class="section">
+  <div class="section-title">导航与定位（已有基础，可扩展）</div>
+  <div class="feature-grid">
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/definition</span>
+        <span class="card-cmd">def ✓</span>
+      </div>
+      <div class="card-desc">跳转到符号定义位置。</div>
+      <div><span class="tag tag-exists">已有</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div></div>
+        <span class="value-label">agent 价值 5/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/references</span>
+        <span class="card-cmd">refs ✓</span>
+      </div>
+      <div class="card-desc">查找所有引用，仅返回真实引用，不含字符串内容。</div>
+      <div><span class="tag tag-exists">已有</span><span class="tag tag-grep">解决grep痛点</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div></div>
+        <span class="value-label">agent 价值 5/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/typeDefinition</span>
+        <span class="card-cmd">typedef ✓</span>
+      </div>
+      <div class="card-desc">从变量跳转到其类型定义，而非赋值处。</div>
+      <div><span class="tag tag-exists">已有</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot"></div></div>
+        <span class="value-label">agent 价值 4/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/implementation</span>
+        <span class="card-cmd">impl ✓</span>
+      </div>
+      <div class="card-desc">查找接口/抽象方法的所有具体实现。</div>
+      <div><span class="tag tag-exists">已有</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div></div>
+        <span class="value-label">agent 价值 5/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/declaration</span>
+        <span class="card-cmd">decl — 待接入</span>
+      </div>
+      <div class="card-desc">跳转到声明处（接口声明），区别于 definition（实现处）。对接口方法追踪有用。</div>
+      <div><span class="tag tag-new">待接入</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot"></div><div class="dot"></div></div>
+        <span class="value-label">agent 价值 3/5</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">语义分析（agent 最缺这类信息）</div>
+  <div class="feature-grid">
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/semanticTokens</span>
+        <span class="card-cmd">semtok — 待接入</span>
+      </div>
+      <div class="card-desc">返回文件中每个 token 的精确类型（method、variable、class、parameter…）。grep 搜 process 无法区分方法调用、变量名、字符串，semantic tokens 能精确消歧。</div>
+      <div><span class="tag tag-new">待接入</span><span class="tag tag-grep">解决grep痛点</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div></div>
+        <span class="value-label">agent 价值 5/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/inlayHint</span>
+        <span class="card-cmd">inlay — 待接入</span>
+      </div>
+      <div class="card-desc">获取编译器推断的类型信息（var 推断类型、参数名标注）。agent 阅读代码时补全隐式信息，减少猜测。</div>
+      <div><span class="tag tag-new">待接入</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot"></div></div>
+        <span class="value-label">agent 价值 4/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/documentHighlight</span>
+        <span class="card-cmd">highlight — 待接入</span>
+      </div>
+      <div class="card-desc">查找同一文件内所有对某符号的引用高亮位置，区分 read/write/text 类型。比 grep 更精确，限定在单文件范围。</div>
+      <div><span class="tag tag-new">待接入</span><span class="tag tag-grep">解决grep痛点</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot"></div><div class="dot"></div></div>
+        <span class="value-label">agent 价值 3/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/diagnostics</span>
+        <span class="card-cmd">diag — 待接入</span>
+      </div>
+      <div class="card-desc">获取文件的编译错误、警告列表（带行号和错误码）。agent 修改代码后可验证是否引入编译错误，形成编辑→验证闭环。</div>
+      <div><span class="tag tag-new">待接入</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div></div>
+        <span class="value-label">agent 价值 5/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/codeLens</span>
+        <span class="card-cmd">lens — 待接入</span>
+      </div>
+      <div class="card-desc">获取方法上的 code lens 信息（如 "5 references"、"Override" 标注）。可用于快速判断方法热度和继承关系。</div>
+      <div><span class="tag tag-new">待接入</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot"></div><div class="dot"></div></div>
+        <span class="value-label">agent 价值 3/5</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">重构与编辑（agent 修改代码阶段）</div>
+  <div class="feature-grid">
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/rename</span>
+        <span class="card-cmd">rename — 待接入</span>
+      </div>
+      <div class="card-desc">语义级重命名：返回所有需要修改的位置（WorkspaceEdit），不遗漏、不误改字符串。agent 执行重命名任务的核心能力。</div>
+      <div><span class="tag tag-new">待接入</span><span class="tag tag-grep">解决grep痛点</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div></div>
+        <span class="value-label">agent 价值 5/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/codeAction</span>
+        <span class="card-cmd">action — 待接入</span>
+      </div>
+      <div class="card-desc">获取可用的快速修复和重构操作列表（如 import、提取方法、实现接口方法）。agent 可枚举选项后按需执行。</div>
+      <div><span class="tag tag-new">待接入</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot"></div></div>
+        <span class="value-label">agent 价值 4/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/formatting</span>
+        <span class="card-cmd">fmt — 待接入</span>
+      </div>
+      <div class="card-desc">格式化文件或选定区域，返回 TextEdit 列表。agent 修改代码后可自动规范格式，无需依赖外部工具。</div>
+      <div><span class="tag tag-new">待接入</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot"></div><div class="dot"></div></div>
+        <span class="value-label">agent 价值 3/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/prepareRename</span>
+        <span class="card-cmd">rename 的前置检查</span>
+      </div>
+      <div class="card-desc">在执行 rename 前检查目标符号是否可重命名，返回当前名称范围。agent 应先调用此接口再执行 rename，避免无效操作。</div>
+      <div><span class="tag tag-new">待接入</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot"></div><div class="dot"></div></div>
+        <span class="value-label">agent 价值 3/5</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">补全与提示（agent 生成代码阶段）</div>
+  <div class="feature-grid">
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/completion</span>
+        <span class="card-cmd">complete — 待接入</span>
+      </div>
+      <div class="card-desc">获取指定位置的补全候选列表（方法、字段、类名）。agent 生成代码时可用于验证 API 存在性，或探索类的可用方法。</div>
+      <div><span class="tag tag-new">待接入</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot"></div><div class="dot"></div></div>
+        <span class="value-label">agent 价值 3/5</span>
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="card-header">
+        <span class="card-name">textDocument/signatureHelp</span>
+        <span class="card-cmd">sig — 待接入</span>
+      </div>
+      <div class="card-desc">获取方法调用处的参数签名说明（参数名、类型、当前激活参数）。agent 填写方法调用参数时，可验证参数类型是否匹配。</div>
+      <div><span class="tag tag-new">待接入</span></div>
+      <div class="card-value" style="margin-top:6px">
+        <div class="value-dots"><div class="dot filled"></div><div class="dot filled"></div><div class="dot filled"></div><div class="dot"></div><div class="dot"></div></div>
+        <span class="value-label">agent 价值 3/5</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="combo-section">
+  <div class="section-title">有价值的组合命令（多个 LSP 功能合并为单次调用）</div>
+  <div class="combo-grid">
+
+    <div class="combo-card">
+      <div class="combo-name">jls safe-rename</div>
+      <div class="combo-desc">语义级安全重命名。先 prepareRename 检查可行性，再 rename 获取 WorkspaceEdit，最后 diagnostics 验证无编译错误，一步完成。</div>
+      <div class="combo-uses">
+        <span class="combo-tag">prepareRename</span>
+        <span class="combo-tag">rename</span>
+        <span class="combo-tag">diagnostics</span>
+      </div>
+    </div>
+
+    <div class="combo-card">
+      <div class="combo-name">jls where</div>
+      <div class="combo-desc">语义搜索替代 grep。输入符号名，返回所有真实引用（按类型分：方法调用/字段读/字段写），不含字符串和注释中的同名词。</div>
+      <div class="combo-uses">
+        <span class="combo-tag">semanticTokens</span>
+        <span class="combo-tag">references</span>
+        <span class="combo-tag">documentHighlight</span>
+      </div>
+    </div>
+
+    <div class="combo-card">
+      <div class="combo-name">jls impact</div>
+      <div class="combo-desc">改动影响分析。给定一个方法，返回：直接调用者、跨模块引用数、相关测试类、是否被接口/抽象类声明。帮助 agent 评估改动风险。</div>
+      <div class="combo-uses">
+        <span class="combo-tag">references</span>
+        <span class="combo-tag">callHierarchy</span>
+        <span class="combo-tag">implementations</span>
+        <span class="combo-tag">codeLens</span>
+      </div>
+    </div>
+
+    <div class="combo-card">
+      <div class="combo-name">jls explain</div>
+      <div class="combo-desc">方法语义摘要。聚合 hover（文档）、inlayHint（推断类型）、codeLens（引用数）、typeDefinition，一次返回 agent 理解方法所需的全部元数据。</div>
+      <div class="combo-uses">
+        <span class="combo-tag">hover</span>
+        <span class="combo-tag">inlayHint</span>
+        <span class="combo-tag">codeLens</span>
+        <span class="combo-tag">typeDefinition</span>
+      </div>
+    </div>
+
+    <div class="combo-card">
+      <div class="combo-name">jls edit-verify</div>
+      <div class="combo-desc">编辑后验证。agent 写入代码修改后，立即拉取 diagnostics + semanticTokens，确认无编译错误，且新引入的标识符类型符合预期。形成编辑闭环。</div>
+      <div class="combo-uses">
+        <span class="combo-tag">diagnostics</span>
+        <span class="combo-tag">semanticTokens</span>
+        <span class="combo-tag">codeAction</span>
+      </div>
+    </div>
+
+    <div class="combo-card">
+      <div class="combo-name">jls type-context</div>
+      <div class="combo-desc">类型上下文探查。给定变量或表达式，返回：推断类型、类型定义位置、该类型的可用方法列表（来自 completion）。agent 写调用链时使用。</div>
+      <div class="combo-uses">
+        <span class="combo-tag">inlayHint</span>
+        <span class="combo-tag">typeDefinition</span>
+        <span class="combo-tag">completion</span>
+        <span class="combo-tag">hover</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</div>

@@ -16,8 +16,9 @@ import { CLIResult, InitStage, ProjectLoadState, DocumentHighlightKindMap, Compl
 import { PACKAGE_VERSION } from '../../core/constants';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
 import { looksLikeJdkSymbol, buildJdkHint } from '../../core/utils/jdkSymbolHint';
+import { decodeSemanticTokens } from '../../core/utils/semanticTokens';
+import { flattenWorkspaceEdit } from '../../core/utils/workspaceEdit';
 import { rewriteCallItem, rewriteLocation, rewriteLocations } from '../../libraryProvider/uriRewriter';
-// SP05：daemon 级 cache / library / config 端点
 import { cleanStale, cleanAll } from '../../libraryProvider/cache/cacheCleaner';
 import { save as saveDaemonConfig, load as loadDaemonConfig } from '../../libraryProvider/daemonConfigStore';
 import { collectStats } from '../../libraryProvider/cache/cacheStats';
@@ -659,7 +660,8 @@ async function handleDiagnostics(body: any, activeClient: any, startTime: number
     throw new Error('Missing parameter: file');
   }
   const diagnostics = await activeClient.getDiagnostics(body.file);
-  return { diagnostics, count: diagnostics.length };
+  const arr = Array.isArray(diagnostics) ? diagnostics : [];
+  return { diagnostics: arr, count: arr.length };
 }
 
 /**
@@ -678,64 +680,7 @@ async function handleRename(body: any, activeClient: any, startTime: number, res
     return 'handled';
   }
   const workspaceEdit = await activeClient.getRename(body.file, posResult.line, posResult.col, body.newName);
-
-  // 扁平化 WorkspaceEdit
-  const changes: any[] = [];
-  if (workspaceEdit?.changes) {
-    for (const [uri, edits] of Object.entries(workspaceEdit.changes) as [string, any[]][]) {
-      for (const e of edits) {
-        changes.push({ file: uri, range: e.range, newText: e.newText });
-      }
-    }
-  }
-  if (workspaceEdit?.documentChanges) {
-    for (const docChange of workspaceEdit.documentChanges) {
-      if (docChange.textDocument && docChange.edits) {
-        for (const e of docChange.edits) {
-          changes.push({ file: docChange.textDocument.uri, range: e.range, newText: e.newText });
-        }
-      }
-    }
-  }
-  return { changes, count: changes.length };
-}
-
-// ── 批量 LSP 命令 handler ──
-
-function decodeSemanticTokens(raw: any, legend?: { tokenTypes: string[]; tokenModifiers: string[] } | null) {
-  const data = raw?.data;
-  if (!data || !Array.isArray(data)) return { tokens: [], count: 0 };
-
-  const tokenTypeNames = legend?.tokenTypes || [];
-  const tokenModifierNames = legend?.tokenModifiers || [];
-
-  const tokens: any[] = [];
-  let prevLine = 0, prevChar = 0;
-  for (let i = 0; i < data.length; i += 5) {
-    const deltaLine = data[i], deltaStartChar = data[i + 1], length = data[i + 2];
-    const tokenType = data[i + 3], tokenModifiers = data[i + 4];
-    const line = deltaLine === 0 ? prevLine : prevLine + deltaLine;
-    const startChar = deltaLine === 0 ? prevChar + deltaStartChar : deltaStartChar;
-
-    const decodedModifiers: string[] = [];
-    if (tokenModifierNames.length > 0) {
-      for (let bit = 0; bit < tokenModifierNames.length; bit++) {
-        if (tokenModifiers & (1 << bit)) {
-          decodedModifiers.push(tokenModifierNames[bit]);
-        }
-      }
-    }
-
-    tokens.push({
-      line,
-      startChar,
-      length,
-      tokenType: tokenTypeNames[tokenType] || tokenType,
-      tokenModifiers: decodedModifiers.length > 0 ? decodedModifiers : tokenModifiers,
-    });
-    prevLine = line; prevChar = startChar;
-  }
-  return { tokens, count: tokens.length, resultId: raw.resultId };
+  return flattenWorkspaceEdit(workspaceEdit);
 }
 
 async function handleSemanticTokens(body: any, activeClient: any, startTime: number) {
@@ -810,8 +755,6 @@ async function handleSignatureHelp(body: any, activeClient: any, startTime: numb
   if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
   return await activeClient.getSignatureHelp(body.file, posResult.line, posResult.col);
 }
-
-// ── 第三批 LSP 命令 handler ──
 
 async function handleDeclaration(body: any, activeClient: any, startTime: number, res: http.ServerResponse) {
   const posResult = await resolvePosition(body, activeClient);
@@ -1035,11 +978,11 @@ async function handleTypeDefinition(body: any, activeClient: any, startTime: num
     const explainEmpty = body.explainEmpty || false;
     const typeDefResult = await activeClient.getTypeDefinition(body.file, posResult.line, posResult.col, explainEmpty);
     if (!typeDefResult) return { locations: [], count: 0 };
-    // SP06: 对 jdt:// URI 执行重写
     if (typeDefResult.locations && Array.isArray(typeDefResult.locations)) {
       typeDefResult.locations = await rewriteLocations(typeDefResult.locations);
     } else if (Array.isArray(typeDefResult)) {
-      return await rewriteLocations(typeDefResult);
+      const rewritten = await rewriteLocations(typeDefResult);
+      return { locations: rewritten, count: rewritten.length };
     }
     return typeDefResult;
   } catch (error: any) {

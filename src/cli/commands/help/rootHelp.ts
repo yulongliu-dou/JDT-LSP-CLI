@@ -12,6 +12,18 @@ Commands:
   call-hierarchy, ch 分析调用链
   implementations, impl 查找实现
   type-definition, typedef 跳转到类型定义
+  diagnostics, diag  获取文件编译错误和警告
+  semantic-tokens, semtok 获取 token 精确类型（方法/变量/类…）
+  rename             语义级重命名（返回 WorkspaceEdit）
+  inlay-hint, inlay  获取推断类型和参数名标注
+  code-action, action 获取快速修复和重构操作列表
+  document-highlight, highlight 单文件内符号引用高亮
+  code-lens, lens    获取方法引用数、Override 标注
+  completion, complete 获取补全候选列表
+  signature-help, sig 获取参数签名说明
+  declaration, decl   跳转到符号的声明位置
+  formatting, fmt      获取文件格式化编辑列表
+  prepare-rename, preren 检查位置是否可重命名
   daemon             管理后台守护进程
   cache              管理源码缓存和 Jar 解析
   config             查看/编辑配置

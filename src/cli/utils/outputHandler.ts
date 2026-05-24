@@ -35,6 +35,23 @@ export function compactData(data: any, command: string): any {
       'f': 'symbols',
       'typeDefinition': 'locations',
       'typedef': 'locations',
+      'diagnostics': 'diagnostics',
+      'diag': 'diagnostics',
+      'rename': 'changes',
+      'semanticTokens': 'tokens',
+      'semtok': 'tokens',
+      'inlayHint': 'hints',
+      'codeAction': 'actions',
+      'documentHighlight': 'highlights',
+      'codeLens': 'lenses',
+      'completion': 'items',
+      'signatureHelp': 'signatures',
+      'declaration': 'locations',
+      'decl': 'locations',
+      'formatting': 'edits',
+      'fmt': 'edits',
+      'prepareRename': null as any, // prepareRename 返回 {range, valid} 而非数组包装对象
+      'preren': null as any,
     };
     
     const arrayField = arrayFieldMap[command];
