@@ -525,6 +525,22 @@ async function startDaemonWithFork(
         const progress: InitProgress = msg.data;
         const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
         spinner.update({ text: `${progress.message} (${progress.percent}%) - ${elapsedSec}s` });
+      } else if (msg.type === 'jre-progress') {
+        const data = msg.data;
+        const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+        if (data.stage === 'cached') {
+          spinner.update({ text: `JRE 已缓存 (${data.version}) - ${elapsedSec}s` });
+        } else if (data.stage === 'probing') {
+          spinner.update({ text: `探测 JRE 下载源... - ${elapsedSec}s` });
+        } else if (data.stage === 'downloading') {
+          spinner.update({ text: `⬇ ${data.message} - ${elapsedSec}s` });
+        } else if (data.stage === 'download-progress') {
+          spinner.update({ text: `⬇ ${data.source} ${data.pct}% ${data.speedKB} KB/s - ${elapsedSec}s` });
+        } else if (data.stage === 'switching') {
+          spinner.warn({ text: `⚠ ${data.message} - ${elapsedSec}s` });
+          // 重新创建 spinner 以继续显示后续进度
+          spinner.start();
+        }
       } else if (msg.type === 'ready') {
         initCompleted = true;
         const elapsed = Math.floor((Date.now() - startTime) / 1000);

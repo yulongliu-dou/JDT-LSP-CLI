@@ -57,10 +57,10 @@ function formatDateTime(d: Date): string {
 /**
  * 启动守护进程
  */
-export async function startDaemon(port: number = DEFAULT_PORT, options?: { eagerInit?: boolean; projectPath?: string; jdtlsPath?: string; multiProject?: boolean }): Promise<void> {
+export async function startDaemon(port: number = DEFAULT_PORT, options?: { eagerInit?: boolean; projectPath?: string; jdtlsPath?: string; multiProject?: boolean; onJreProgress?: (msg: { type: string; data: any }) => void }): Promise<void> {
   // 0. 确保 JRE 已就绪（在环境预检前，供子进程使用）
   const jreManager = getJreManager();
-  const jreInfo = await jreManager.ensure();
+  const jreInfo = await jreManager.ensure(false, options?.onJreProgress);
   if (!process.env.JAVA_HOME) {
     process.env.JAVA_HOME = jreInfo.path;
   }

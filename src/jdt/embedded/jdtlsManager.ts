@@ -252,10 +252,14 @@ export class EmbeddedJdtlsManager {
    */
   private async extractTarGz(archivePath: string, destDir: string): Promise<void> {
     ensureDir(destDir);
-    // Windows tar 将盘符中的 : 误解为远程主机名；--force-local 强制本地路径
     const tarArchive = archivePath.replace(/\\/g, '/');
     const tarDest = destDir.replace(/\\/g, '/');
-    execSync(`tar --force-local -xzf "${tarArchive}" -C "${tarDest}"`, {
+    // Windows 盘符中的 : 被 tar 误解为远程主机名，需 --force-local；macOS/Linux 的 tar 不支持此选项
+    const isWindows = process.platform === 'win32';
+    const tarCmd = isWindows
+      ? `tar --force-local -xzf "${tarArchive}" -C "${tarDest}"`
+      : `tar -xzf "${tarArchive}" -C "${tarDest}"`;
+    execSync(tarCmd, {
       stdio: 'pipe',
       timeout: 120000,
     });
