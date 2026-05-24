@@ -12,7 +12,7 @@ import { initClient } from '../services/projectService';
 import { resolvePosition } from '../services/positionResolver';
 import { diagnoseProjectMismatch } from '../services/diagnostics';
 import * as path from 'path';
-import { CLIResult, InitStage, ProjectLoadState } from '../../core/types';
+import { CLIResult, InitStage, ProjectLoadState, DocumentHighlightKindMap, CompletionItemKindMap } from '../../core/types';
 import { PACKAGE_VERSION } from '../../core/constants';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
 import { looksLikeJdkSymbol, buildJdkHint } from '../../core/utils/jdkSymbolHint';
@@ -763,7 +763,10 @@ async function handleDocumentHighlight(body: any, activeClient: any, startTime: 
   const posResult = await resolvePosition(body, activeClient);
   if ('success' in posResult) { sendResponse(res, { ...posResult, elapsed: Date.now() - startTime }); return 'handled'; }
   const highlights = await activeClient.getDocumentHighlight(body.file, posResult.line, posResult.col);
-  return { highlights, count: Array.isArray(highlights) ? highlights.length : 0 };
+  const mapped = Array.isArray(highlights)
+    ? highlights.map((h: any) => ({ ...h, kind: DocumentHighlightKindMap[h.kind] || h.kind }))
+    : highlights;
+  return { highlights: mapped, count: Array.isArray(mapped) ? mapped.length : 0 };
 }
 
 async function handleCodeLens(body: any, activeClient: any, startTime: number) {

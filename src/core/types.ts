@@ -578,7 +578,7 @@ export const COMPACT_FIELDS: CompactFieldConfig = {
   documentHighlight: ['kind', 'range.start.line', 'range.start.character'],
   codeLens: ['range.start.line', 'command.title'],
   completion: ['label', 'kind', 'detail'],
-  signatureHelp: ['label', 'parameters'],
+  signatureHelp: ['label', 'parameters', 'documentation'],
   declaration: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   decl: ['uri', 'range.start.line', 'range.start.character', 'range.end.line', 'range.end.character', 'originalUri', 'originalRange', 'source', 'note', 'lockWaitMs', 'lineMapping'],
   formatting: ['range.start.line', 'range.start.character', 'newText'],
