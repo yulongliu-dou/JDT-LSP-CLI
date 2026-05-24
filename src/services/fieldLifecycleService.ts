@@ -6,7 +6,7 @@
  */
 
 import * as fs from 'fs';
-import { FieldAnnotation, AnnotationGroup, EnhancedReference, ReferenceContext, ReferenceImpact, Location, AccessType, ViaType, DocumentSymbol, LifecycleSummary, LifecycleResult, LifecycleHints, PropagationTarget, EnumMapping, DtoChainInfo, ConditionalPathSummary, SameNameFieldHint } from '../core/types';
+import { FieldAnnotation, AnnotationGroup, EnhancedReference, ReferenceContext, ReferenceImpact, Location, AccessType, ViaType, DocumentSymbol, LifecycleSummary, LifecycleResult, LifecycleHints, PropagationTarget, EnumMapping, DtoChainInfo, ConditionalPathSummary, SameNameFieldHint, FieldFlowResult } from '../core/types';
 
 function detectLombokAnnotations(sourceLines: string[], className: string): FieldAnnotation[] {
   const annotations: FieldAnnotation[] = [];
@@ -674,4 +674,137 @@ export async function analyzeFieldLifecycle(
   const hints = buildHints(propagationTargets, enhancedRefs, projectPath, fieldName);
 
   return { summary, references: enhancedRefs, hints };
+}
+
+// ========== 二期：callHierarchy --lifecycle 字段流分析 ==========
+
+/**
+ * 从方法签名 detail 中解析参数名→类型名映射
+ *
+ * detail 格式示例:
+ *   "OrderVO dtoToVo(OrderDTO dto)"    → { dto: "OrderDTO" }
+ *   "void process(OrderEntity entity, boolean flag)" → { entity: "OrderEntity", flag: "boolean" }
+ *   "void setStatus(Integer status)"     → { status: "Integer" }
+ */
+function parseParameterTypes(detail: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const parenStart = detail.indexOf('(');
+  const parenEnd = detail.lastIndexOf(')');
+  if (parenStart < 0 || parenEnd < 0) return map;
+
+  const paramsStr = detail.substring(parenStart + 1, parenEnd).trim();
+  if (!paramsStr) return map;
+
+  for (const param of paramsStr.split(',')) {
+    const trimmed = param.trim();
+    const parts = trimmed.split(/\s+/);
+    if (parts.length >= 2) {
+      const typeName = parts.slice(0, -1).join(' ');
+      const varName = parts[parts.length - 1];
+      if (typeName !== 'int' && typeName !== 'long' && typeName !== 'boolean' &&
+          typeName !== 'double' && typeName !== 'float' && typeName !== 'byte' &&
+          typeName !== 'short' && typeName !== 'char') {
+        map.set(varName, typeName.replace(/^.*\./, ''));
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * 从方法体源码中提取局部变量声明 → 类型映射
+ *
+ * 识别模式: "TypeName varName = new TypeName()" 或 "TypeName varName = ..."
+ * 取简单类名
+ */
+function parseLocalVariables(
+  bodyLines: string[]
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const line of bodyLines) {
+    const m = line.match(
+      /\b([A-Z]\w*(?:\s*<[^>]+>)?)\s+(\w+)\s*=/
+    );
+    if (m) {
+      const typeName = m[1].replace(/\s+/g, '');
+      const varName = m[2];
+      if (!['int', 'long', 'boolean', 'double', 'float', 'byte', 'short', 'char',
+            'String', 'Integer', 'Long', 'Boolean', 'Double', 'Float', 'BigDecimal',
+            'List', 'Map', 'Set', 'ArrayList', 'HashMap'].includes(typeName.split('<')[0])) {
+        map.set(varName, typeName);
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * 分析被调用方法内部的字段读写操作
+ *
+ * 通过解析方法签名获取参数类型映射，扫描方法体中的 getter/setter 调用，
+ * 解析变量→类名关系，返回该方法的字段读写清单。
+ *
+ * @param sourceLines - 方法所在文件的全部源码行
+ * @param methodStartLine - 方法起始行号 (0-based)
+ * @param methodEndLine - 方法结束行号 (0-based, inclusive)
+ * @param methodDetail - 方法签名，如 "OrderVO dtoToVo(OrderDTO dto)"
+ * @returns 字段读写信息
+ */
+export function analyzeMethodFieldFlow(
+  sourceLines: string[],
+  methodStartLine: number,
+  methodEndLine: number,
+  methodDetail: string
+): FieldFlowResult {
+  const paramTypes = parseParameterTypes(methodDetail);
+
+  const bodyStartLine = methodStartLine + 1;
+  const bodyLines: string[] = [];
+  for (let i = bodyStartLine; i <= methodEndLine && i < sourceLines.length; i++) {
+    bodyLines.push(sourceLines[i]);
+  }
+
+  const localVarTypes = parseLocalVariables(bodyLines);
+
+  function resolveClassName(varName: string): string | null {
+    if (paramTypes.has(varName)) return paramTypes.get(varName)!;
+    if (localVarTypes.has(varName)) return localVarTypes.get(varName)!;
+    return null;
+  }
+
+  const reads = new Set<string>();
+  const writes = new Set<string>();
+
+  for (const line of bodyLines) {
+    if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
+
+    const setterPattern = /(\w+)\.set(\w+)\s*\(/g;
+    let sm;
+    while ((sm = setterPattern.exec(line)) !== null) {
+      const varName = sm[1];
+      const fieldPart = sm[2];
+      const fieldName = fieldPart.charAt(0).toLowerCase() + fieldPart.slice(1);
+      const className = resolveClassName(varName);
+      if (className) {
+        writes.add(`${className}.${fieldName}`);
+      }
+    }
+
+    const getterPattern = /(\w+)\.(?:get|is)(\w+)\s*\(\)/g;
+    let gm;
+    while ((gm = getterPattern.exec(line)) !== null) {
+      const varName = gm[1];
+      const fieldPart = gm[2];
+      const fieldName = fieldPart.charAt(0).toLowerCase() + fieldPart.slice(1);
+      const className = resolveClassName(varName);
+      if (className) {
+        reads.add(`${className}.${fieldName}`);
+      }
+    }
+  }
+
+  return {
+    reads: Array.from(reads).sort(),
+    writes: Array.from(writes).sort(),
+  };
 }
