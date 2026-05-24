@@ -522,6 +522,23 @@ export interface CompactFieldConfig {
   workspaceSymbols: string[];
   find: string[];  // 别名
   f: string[];     // 别名
+  diagnostics: string[];
+  diag: string[];  // 别名
+  rename: string[];
+  semanticTokens: string[];
+  semtok: string[];
+  inlayHint: string[];
+  codeAction: string[];
+  documentHighlight: string[];
+  codeLens: string[];
+  completion: string[];
+  signatureHelp: string[];
+  declaration: string[];
+  decl: string[];
+  formatting: string[];
+  fmt: string[];
+  prepareRename: string[];
+  preren: string[];
 }
 
 /**
@@ -551,6 +568,23 @@ export const COMPACT_FIELDS: CompactFieldConfig = {
   workspaceSymbols: ['name', 'kind', 'location.uri', 'location.range.start.line'],
   find: ['name', 'kind', 'location.uri', 'location.range.start.line'],  // 别名支持
   f: ['name', 'kind', 'location.uri', 'location.range.start.line'],  // 别名支持
+  diagnostics: ['severity', 'message', 'code', 'range.start.line', 'range.start.character'],
+  diag: ['severity', 'message', 'code', 'range.start.line', 'range.start.character'],
+  rename: ['file', 'range.start.line', 'range.start.character', 'newText'],  // TODO: edits 为嵌套数组，compact 暂按 change 级别处理
+  semanticTokens: ['line', 'startChar', 'length', 'tokenType'],
+  semtok: ['line', 'startChar', 'length', 'tokenType'],
+  inlayHint: ['label', 'position.line', 'position.character'],
+  codeAction: ['title', 'kind'],
+  documentHighlight: ['kind', 'range.start.line', 'range.start.character'],
+  codeLens: ['range.start.line', 'command.title'],
+  completion: ['label', 'kind', 'detail'],
+  signatureHelp: ['label', 'parameters'],
+  declaration: ['uri', 'range.start.line', 'range.start.character'],
+  decl: ['uri', 'range.start.line', 'range.start.character'],
+  formatting: ['range.start.line', 'range.start.character', 'newText'],
+  fmt: ['range.start.line', 'range.start.character', 'newText'],
+  prepareRename: ['start.line', 'start.character', 'end.line', 'end.character'],
+  preren: ['start.line', 'start.character', 'end.line', 'end.character'],
 };
 
 // Symbol kinds mapping
@@ -581,5 +615,41 @@ export const SymbolKindMap: Record<number, string> = {
   24: 'Event',
   25: 'Operator',
   26: 'TypeParameter'
+};
+
+// CompletionItemKind mapping (LSP spec)
+export const CompletionItemKindMap: Record<number, string> = {
+  1: 'Text',
+  2: 'Method',
+  3: 'Function',
+  4: 'Constructor',
+  5: 'Field',
+  6: 'Variable',
+  7: 'Class',
+  8: 'Interface',
+  9: 'Module',
+  10: 'Property',
+  11: 'Unit',
+  12: 'Value',
+  13: 'Enum',
+  14: 'Keyword',
+  15: 'Snippet',
+  16: 'Color',
+  17: 'File',
+  18: 'Reference',
+  19: 'Folder',
+  20: 'EnumMember',
+  21: 'Constant',
+  22: 'Struct',
+  23: 'Event',
+  24: 'Operator',
+  25: 'TypeParameter',
+};
+
+// DocumentHighlightKind mapping (LSP spec)
+export const DocumentHighlightKindMap: Record<number, string> = {
+  1: 'Text',
+  2: 'Read',
+  3: 'Write',
 };
 
