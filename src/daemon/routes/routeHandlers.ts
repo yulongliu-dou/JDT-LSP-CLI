@@ -566,9 +566,8 @@ async function handleDefinition(body: any, activeClient: any, startTime: number,
         const content = await import('fs').then(m => m.readFileSync(defFilePath, 'utf-8'));
         const lines = content.split('\n');
         const lineNum = (defFile.range?.start?.line || 0) + 1;
-        const declLine = lines[lineNum - 1]?.trim() || '';
         const className = defFilePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.java$/, '') || '';
-        const annotations = extractAnnotations(lines, declLine, body.symbol, className);
+        const annotations = extractAnnotations(lines, lineNum - 1, body.symbol, className);
         return { definition: Array.isArray(rewritten) ? rewritten : [rewritten], annotations };
       }
     } catch { /* non-blocking */ }

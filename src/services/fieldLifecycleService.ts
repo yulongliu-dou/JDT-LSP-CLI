@@ -83,7 +83,7 @@ function detectTableAnnotation(sourceLines: string[], className: string): FieldA
 
 export function extractAnnotations(
   sourceLines: string[],
-  fieldSourceLine: string,
+  fieldLineIndex: number,
   fieldName: string,
   className: string
 ): AnnotationGroup {
@@ -92,11 +92,21 @@ export function extractAnnotations(
   const lombok = detectLombokAnnotations(sourceLines, className);
   if (lombok.length) annotations.lombok = lombok;
 
-  const json = detectJsonAnnotations(fieldSourceLine, fieldName, className);
+  // check both the field line and the line above it for annotations
+  const fieldSourceLine = sourceLines[fieldLineIndex]?.trim() || '';
+  const prevLine = fieldLineIndex > 0 ? (sourceLines[fieldLineIndex - 1]?.trim() || '') : '';
+
+  const json = [
+    ...detectJsonAnnotations(fieldSourceLine, fieldName, className),
+    ...detectJsonAnnotations(prevLine, fieldName, className),
+  ];
   if (json.length) annotations.json = json;
 
   const dbTable = detectTableAnnotation(sourceLines, className);
-  const dbCol = detectDbAnnotations(fieldSourceLine, fieldName, className);
+  const dbCol = [
+    ...detectDbAnnotations(fieldSourceLine, fieldName, className),
+    ...detectDbAnnotations(prevLine, fieldName, className),
+  ];
   const db = [...dbTable, ...dbCol];
   if (db.length) annotations.db = db;
 
@@ -503,8 +513,7 @@ export async function analyzeFieldLifecycle(
   const declLines = readSourceLines(declaringFilePath);
   sourceLinesCache.set(declaringFilePath, declLines);
 
-  const declLine = declLines[declaringLine - 1]?.trim() || '';
-  const annotations = extractAnnotations(declLines, declLine, fieldName, containingClass);
+  const annotations = extractAnnotations(declLines, declaringLine - 1, fieldName, containingClass);
 
   // discover getter/setter methods from documentSymbols
   const capitalizedName = fieldName.charAt(0).toUpperCase() + fieldName.slice(1);

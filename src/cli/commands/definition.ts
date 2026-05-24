@@ -109,9 +109,8 @@ export function registerDefinitionCommand(program: Command) {
             try {
               const content = await import('fs').then(m => m.readFileSync(filePath, 'utf-8'));
               const lines = content.split('\n');
-              const declLine = lines[finalLine - 1]?.trim() || '';
               const className = filePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.java$/, '') || '';
-              const annotations = extractAnnotations(lines, declLine, cmdOptions.symbol, className);
+              const annotations = extractAnnotations(lines, finalLine - 1, cmdOptions.symbol, className);
 
               return {
                 definition: Array.isArray(result) ? result : [result],
