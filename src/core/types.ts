@@ -653,3 +653,139 @@ export const DocumentHighlightKindMap: Record<number, string> = {
   3: 'Write',
 };
 
+// ========== 字段生命周期追踪类型 ==========
+
+export type AccessType = 'read' | 'write' | 'readWrite' | 'unknown';
+
+export type ViaType = 'direct' | 'getter' | 'setter' | 'reflection' | 'unknown';
+
+export type PropagationConfidence = 'high' | 'medium' | 'low';
+
+export interface FieldAnnotation {
+  name: string;
+  attributes: Record<string, string>;
+  location?: string;
+  on?: string;
+  effect?: string;
+}
+
+export interface AnnotationGroup {
+  lombok?: FieldAnnotation[];
+  json?: FieldAnnotation[];
+  db?: FieldAnnotation[];
+}
+
+export interface PropagationTarget {
+  class: string;
+  field: string;
+  type: string;
+}
+
+export interface EnumMapping {
+  enumClass: string;
+  constants: Array<{
+    name: string;
+    value: number | string;
+    description: string;
+  }>;
+  resolverMethods: string[];
+}
+
+export interface DtoChainInfo {
+  chains: Array<{
+    path: string;
+    methods: string[];
+  }>;
+}
+
+export interface ConditionalPathSummary {
+  method: string;
+  branches: number;
+  details: Array<{
+    condition: string;
+    assignment: string;
+  }>;
+}
+
+export interface ReferenceContext {
+  enclosingMethod: string;
+  enclosingClass: string;
+  branch: string | null;
+}
+
+export interface ReferenceImpact {
+  value: string | null;
+  valueSource: string | null;
+}
+
+export interface EnhancedReference extends Location {
+  sourceLine: string;
+  accessType: AccessType;
+  via: ViaType;
+  targetMethod: string | null;
+  context: ReferenceContext;
+  impact: ReferenceImpact;
+  originalUri?: string;
+  originalRange?: Range;
+  source?: string;
+  note?: string;
+  lockWaitMs?: number;
+  lineMapping?: string;
+}
+
+export interface SameNameFieldHint {
+  class: string;
+  field: string;
+  confidence: PropagationConfidence;
+  reason: string;
+}
+
+export interface UnverifiedPropagation {
+  class: string;
+  field: string;
+  confidence: 'low';
+  reason: string;
+  nextAction: string;
+}
+
+export interface ReflectionRiskHint {
+  detectedLibraries: string[];
+  suspectedPatterns: string[];
+  advice: string;
+}
+
+export interface UnreachableHint {
+  concern: string;
+  detail: string;
+  agentAdvice: string;
+}
+
+export interface LifecycleHints {
+  propagationConfidence: 'full' | 'partial' | 'none';
+  sameNameFields?: SameNameFieldHint[];
+  unverifiedPropagations?: UnverifiedPropagation[];
+  reflectionRisk?: ReflectionRiskHint;
+  unreachableViaJdtLs?: UnreachableHint[];
+}
+
+export interface LifecycleSummary {
+  field: {
+    name: string;
+    type: string;
+    containingClass: string;
+  };
+  annotations: AnnotationGroup;
+  accessStats: { read: number; write: number };
+  viaStats: { direct: number; getter: number; setter: number };
+  propagationTargets: PropagationTarget[];
+  enumMapping?: EnumMapping;
+  dtoChain?: DtoChainInfo;
+  conditionalPaths?: ConditionalPathSummary[];
+}
+
+export interface LifecycleResult {
+  summary: LifecycleSummary;
+  references: EnhancedReference[];
+  hints: LifecycleHints;
+}
+
