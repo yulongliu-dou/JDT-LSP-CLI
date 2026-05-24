@@ -497,14 +497,18 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
 
   // 构建项目状态（单项目/当前项目）
   const currentIndexProgress = currentProject ? daemonState.getIndexProgress(currentProject) : undefined;
+  const currentPhase = currentProject ? daemonState.getProjectPhase(currentProject) : undefined;
+  const currentBuildImport = currentProject ? daemonState.getBuildImportProgress(currentProject) : undefined;
   const projectState: any = currentProject ? {
     path: currentProject,
     status: isReady ? 'ready' : initProgress.stage === 'error' ? 'error' : 'loading',
+    phase: currentPhase || (isReady ? 'ready' : 'indexing'),
     loadTime: lastLoadEvent?.loadTime,
     progress: isReady ? undefined : initProgress,
     lastAccess: Date.now(),
     priority: 0,
     indexProgress: currentIndexProgress || { stage: 'not_started', percent: 0 },
+    ...(currentBuildImport && currentBuildImport.stage !== 'completed' ? { buildImport: currentBuildImport } : {}),
   } : undefined;
 
   // 添加当前项目的 processMemory
@@ -520,24 +524,34 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
     }
   }
 
-  // 确定整体状态
-  let overallStatus: 'idle' | 'starting' | 'initializing' | 'indexing' | 'ready' | 'error';
+  // 确定整体状态（使用 ProjectPhase 排序）
+  let overallStatus: 'idle' | 'starting' | 'initializing' | 'indexing' | 'ready' | 'error' = 'idle';
+
+  const phaseOrder: Record<string, number> = {
+    'ready': 0, 'indexing': 1, 'connecting': 2, 'error': 3,
+  };
 
   // 多项目模式：从项目池聚合状态
   if (projectPool && projectPool.size > 0) {
-    const projectList = projectPool.listProjects();
-    const hasReady = projectList.some((p: { status: string }) => p.status === 'ready');
-    const hasInitializing = projectList.some((p: { status: string }) => p.status === 'initializing');
-    const allError = projectList.every((p: { status: string }) => p.status === 'error');
-    if (allError) {
-      overallStatus = 'error';
-    } else if (hasReady) {
-      overallStatus = 'ready';
-    } else if (hasInitializing) {
-      overallStatus = 'initializing';
-    } else {
-      overallStatus = 'idle';
+    const activeProjects = projectPool.getActiveProjects();
+    let bestPhaseOrder = -1;
+
+    for (const projPath of activeProjects) {
+      const ph = daemonState.getProjectPhase(projPath);
+      const phStr = ph || 'indexing';
+      const order = phaseOrder[phStr] ?? 0;
+      if (order > bestPhaseOrder) {
+        bestPhaseOrder = order;
+        overallStatus = (
+          phStr === 'ready' ? 'ready' :
+          phStr === 'error' ? 'error' :
+          phStr === 'connecting' ? 'starting' :
+          'indexing'
+        ) as typeof overallStatus;
+      }
     }
+
+    if (bestPhaseOrder === -1) overallStatus = 'idle';
   } else if (!currentProject) {
     overallStatus = 'idle';
   } else if (isReady) {
@@ -545,7 +559,7 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
   } else if (initProgress.stage === 'error') {
     overallStatus = 'error';
   } else {
-    const stageMap: Record<InitStage, typeof overallStatus> = {
+    const stageMap: Record<InitStage, 'idle' | 'starting' | 'initializing' | 'indexing' | 'ready' | 'error'> = {
       'idle': 'idle',
       'starting': 'starting',
       'jdt-launching': 'starting',
@@ -557,26 +571,33 @@ async function handleHealthCheck(res: http.ServerResponse, startTime: number) {
     overallStatus = stageMap[initProgress.stage];
   }
 
-  // ---- 多项目列表（含索引进度 + 进程内存） ----
+  // ---- 多项目列表（含 phase + 索引进度 + buildImport + 进程内存） ----
   let projects: any[] | undefined;
   if (projectPool && projectPool.size > 0) {
-    const projectList = projectPool.listProjects();
+    const activeProjects = projectPool.getActiveProjects();
     projects = await Promise.all(
-      projectList.map(async (p: { path: string; status: string; lastAccess: number; priority: number }) => {
+      activeProjects.map(async (projPath: string) => {
+        const projStatus = projectPool.getStatus(projPath);
+        const projPhase = daemonState.getProjectPhase(projPath) || 'indexing';
+        const projBuildImport = daemonState.getBuildImportProgress(projPath);
         const entry: any = {
-          path: p.path,
-          status: p.status,
-          loadTime: projectPool.getProjectLoadTime(p.path),
-          lastAccess: p.lastAccess,
-          priority: p.priority,
-          indexProgress: daemonState.getIndexProgress(p.path) || { stage: 'not_started', percent: 0 },
+          path: projPath,
+          status: projStatus,
+          phase: projPhase,
+          loadTime: projectPool.getProjectLoadTime ? projectPool.getProjectLoadTime(projPath) : undefined,
+          lastAccess: Date.now(),
+          priority: 0,
+          indexProgress: daemonState.getIndexProgress(projPath) || { stage: 'not_started', percent: 0 },
         };
+        if (projBuildImport && projBuildImport.stage !== 'completed') {
+          entry.buildImport = projBuildImport;
+        }
         // 进程内存
         if (memoryMonitor) {
-          const pid = projectPool.getProjectPid(p.path);
+          const pid = projectPool.getProjectPid(projPath);
           if (pid) {
             try {
-              const mem = await memoryMonitor.getProcessMemory(pid, p.path);
+              const mem = await memoryMonitor.getProcessMemory(pid, projPath);
               entry.processMemory = { pid: mem.pid, rssMB: mem.rssMB, timestamp: mem.timestamp };
             } catch { /* non-critical */ }
           }
