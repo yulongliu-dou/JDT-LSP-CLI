@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 
 import { PREPARE_RENAME_HELP } from './help/prepareRenameHelp';
@@ -47,7 +46,7 @@ export function registerPrepareRenameCommand(program: Command) {
       return;
     }
 
-    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
+    const { filePath, line: resolvedLine, col: resolvedCol, sharedClient } = posResult;
 
     await executeCommand(
       '/prepare-rename',
@@ -56,20 +55,15 @@ export function registerPrepareRenameCommand(program: Command) {
         file: filePath,
         line: resolvedLine,
         col: resolvedCol,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
-      async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          const range = await client.getPrepareRename(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
-          if (range && range.start && range.end) {
-            return { range, valid: true };
-          }
-          return { valid: false, reason: 'Cannot rename at this position' };
-        } finally {
-          if (client) await client.stop();
+      async (client) => {
+        const range = await client.getPrepareRename(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
+        if (range && range.start && range.end) {
+          return { range, valid: true };
         }
+        return { valid: false, reason: 'Cannot rename at this position' };
       },
       opts,
       'prepareRename'

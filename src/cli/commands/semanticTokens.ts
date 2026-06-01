@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 import { decodeSemanticTokens } from '../../core/utils/semanticTokens';
 
@@ -50,26 +49,25 @@ export function registerSemanticTokensCommand(program: Command) {
 
       const projectPath = path.resolve(opts.project);
       let fp: string;
+      let sharedClient: any = undefined;
 
       if (hasSymbol) {
         const posResult = await getPosition(file, cmdOptions, opts);
         if ('success' in posResult) { outputResult(posResult, undefined, opts.jsonCompact, opts.output); return; }
         fp = posResult.filePath;
+        sharedClient = posResult.sharedClient;
       } else {
         fp = path.isAbsolute(file) ? file : path.resolve(projectPath, file);
       }
 
       await executeCommand('/semantic-tokens', {
         project: projectPath, file: fp,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
-      }, async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          const raw = await client.getSemanticTokens(fp);
-          const legend = client.getSemanticTokensLegend();
-          return decodeSemanticTokens(raw, legend);
-        } finally { if (client) await client.stop(); }
+      }, async (client) => {
+        const raw = await client.getSemanticTokens(fp);
+        const legend = client.getSemanticTokensLegend();
+        return decodeSemanticTokens(raw, legend);
       }, opts, 'semanticTokens');
     });
 }

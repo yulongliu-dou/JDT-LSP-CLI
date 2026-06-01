@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 
 import { CODE_ACTION_HELP } from './help/codeActionHelp';
@@ -40,18 +39,15 @@ export function registerCodeActionCommand(program: Command) {
       const posResult = await getPosition(file, cmdOptions, opts);
       if ('success' in posResult) { outputResult(posResult, undefined, opts.jsonCompact, opts.output); return; }
 
-      const { filePath: fp, line, col } = posResult;
+      const { filePath: fp, line, col, sharedClient } = posResult;
 
       await executeCommand('/code-action', {
         project: projectPath, file: fp, line, col,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
-      }, async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          const actions = await client.getCodeAction(fp, parseInt(line), parseInt(col));
-          return { actions, count: Array.isArray(actions) ? actions.length : 0 };
-        } finally { if (client) await client.stop(); }
+      }, async (client) => {
+        const actions = await client.getCodeAction(fp, parseInt(line), parseInt(col));
+        return { actions, count: Array.isArray(actions) ? actions.length : 0 };
       }, opts, 'codeAction');
     });
 }

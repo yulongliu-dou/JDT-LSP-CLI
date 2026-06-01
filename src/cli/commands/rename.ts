@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateRenameCommand } from '../utils/paramValidator';
 import { flattenWorkspaceEdit } from '../../core/utils/workspaceEdit';
 
@@ -51,7 +50,7 @@ export function registerRenameCommand(program: Command) {
       return;
     }
 
-    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
+    const { filePath, line: resolvedLine, col: resolvedCol, sharedClient } = posResult;
     const newName = cmdOptions.newName;
 
     await executeCommand(
@@ -65,18 +64,13 @@ export function registerRenameCommand(program: Command) {
         symbol: cmdOptions.symbol,
         kind: cmdOptions.kind,
         index: cmdOptions.index,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
-      async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          const workspaceEdit = await client.getRename(filePath, parseInt(resolvedLine), parseInt(resolvedCol), newName);
-          // 扁平化 WorkspaceEdit → { changes: [...], count }
-          return flattenWorkspaceEdit(workspaceEdit);
-        } finally {
-          if (client) await client.stop();
-        }
+      async (client) => {
+        const workspaceEdit = await client.getRename(filePath, parseInt(resolvedLine), parseInt(resolvedCol), newName);
+        // 扁平化 WorkspaceEdit → { changes: [...], count }
+        return flattenWorkspaceEdit(workspaceEdit);
       },
       opts,
       'rename'

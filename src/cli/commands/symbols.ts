@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { executeCommand, createDirectClient } from '../utils/positionResolver';
+import { executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { symbolKindToString } from '../../core/utils/symbolKind';
 import { validateSymbolsCommand } from '../utils/paramValidator';
 
@@ -41,44 +40,38 @@ export function registerSymbolsCommand(program: Command) {
           flat: cmdOptions.flat,
           options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
         },
-        async () => {
-          let client: JdtLsClient | null = null;
-          try {
-            client = await createDirectClient(opts);
-            let result = await client.getDocumentSymbols(filePath);
-            
-            if (cmdOptions.flat) {
-              const flatList: any[] = [];
-              function flatten(symbols: any[], parent?: string) {
-                for (const sym of symbols) {
-                  flatList.push({ 
-                    name: sym.name, 
-                    kind: symbolKindToString(sym.kind), 
-                    detail: sym.detail, 
-                    range: sym.range, 
-                    parent 
-                  });
-                  if (sym.children) flatten(sym.children, sym.name);
-                }
-              }
-              flatten(result);
-              result = flatList;
-            } else {
-              // 层次化输出也需要转换 kind
-              function convertKind(symbols: any[]): any[] {
-                return symbols.map(sym => ({
-                  ...sym,
+        async (client) => {
+          let result = await client.getDocumentSymbols(filePath);
+
+          if (cmdOptions.flat) {
+            const flatList: any[] = [];
+            function flatten(symbols: any[], parent?: string) {
+              for (const sym of symbols) {
+                flatList.push({
+                  name: sym.name,
                   kind: symbolKindToString(sym.kind),
-                  children: sym.children ? convertKind(sym.children) : undefined
-                }));
+                  detail: sym.detail,
+                  range: sym.range,
+                  parent
+                });
+                if (sym.children) flatten(sym.children, sym.name);
               }
-              result = convertKind(result);
             }
-            
-            return { symbols: result, count: cmdOptions.flat ? result.length : undefined };
-          } finally {
-            if (client) await client.stop();
+            flatten(result);
+            result = flatList;
+          } else {
+            // 层次化输出也需要转换 kind
+            function convertKind(symbols: any[]): any[] {
+              return symbols.map(sym => ({
+                ...sym,
+                kind: symbolKindToString(sym.kind),
+                children: sym.children ? convertKind(sym.children) : undefined
+              }));
+            }
+            result = convertKind(result);
           }
+
+          return { symbols: result, count: cmdOptions.flat ? result.length : undefined };
         },
         opts,
         'symbols'

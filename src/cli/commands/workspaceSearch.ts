@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { executeCommand, createDirectClient } from '../utils/positionResolver';
+import { executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { stringToSymbolKind, symbolKindToString } from '../../core/utils/symbolKind';
 import { looksLikeJdkSymbol, buildJdkHint } from '../../core/utils/jdkSymbolHint';
 import { validateFindCommand } from '../utils/paramValidator';
@@ -45,41 +44,35 @@ export function registerWorkspaceSymbolsCommand(program: Command) {
           limit: cmdOptions.limit,
           options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
         },
-        async () => {
-          let client: JdtLsClient | null = null;
-          try {
-            client = await createDirectClient(opts);
-            await initDirectModeRewriter(client, projectPath);
-            let symbols = await client.getWorkspaceSymbols(query, parseInt(cmdOptions.limit));
+        async (client) => {
+          await initDirectModeRewriter(client, projectPath);
+          let symbols = await client.getWorkspaceSymbols(query, parseInt(cmdOptions.limit));
 
-            // 按 kind 过滤 - 将字符串转换为数字进行比较
-            if (cmdOptions.kind) {
-              const kindNumber = stringToSymbolKind(cmdOptions.kind);
-              if (kindNumber === undefined) {
-                throw new Error(`Invalid symbol kind: ${cmdOptions.kind}. Supported: Class, Method, Field, Interface, Enum, etc.`);
-              }
-              symbols = symbols.filter((s: any) => s.kind === kindNumber);
+          // 按 kind 过滤 - 将字符串转换为数字进行比较
+          if (cmdOptions.kind) {
+            const kindNumber = stringToSymbolKind(cmdOptions.kind);
+            if (kindNumber === undefined) {
+              throw new Error(`Invalid symbol kind: ${cmdOptions.kind}. Supported: Class, Method, Field, Interface, Enum, etc.`);
             }
-
-            // 将 kind 数字转换为字符串用于输出
-            const outputSymbols = symbols.map((s: any) => ({
-              ...s,
-              kind: symbolKindToString(s.kind)
-            }));
-
-            // URI 重写（SymbolInformation 的嵌套 location）
-            const rewrittenSymbols = await rewriteDirectSymbols(outputSymbols);
-
-            if (rewrittenSymbols.length === 0 && looksLikeJdkSymbol(query, cmdOptions.kind)) {
-              throw new Error(
-                `No symbols found for '${query}'.\n` + buildJdkHint(query, cmdOptions.kind)
-              );
-            }
-
-            return { symbols: rewrittenSymbols, count: rewrittenSymbols.length };
-          } finally {
-            if (client) await client.stop();
+            symbols = symbols.filter((s: any) => s.kind === kindNumber);
           }
+
+          // 将 kind 数字转换为字符串用于输出
+          const outputSymbols = symbols.map((s: any) => ({
+            ...s,
+            kind: symbolKindToString(s.kind)
+          }));
+
+          // URI 重写（SymbolInformation 的嵌套 location）
+          const rewrittenSymbols = await rewriteDirectSymbols(outputSymbols);
+
+          if (rewrittenSymbols.length === 0 && looksLikeJdkSymbol(query, cmdOptions.kind)) {
+            throw new Error(
+              `No symbols found for '${query}'.\n` + buildJdkHint(query, cmdOptions.kind)
+            );
+          }
+
+          return { symbols: rewrittenSymbols, count: rewrittenSymbols.length };
         },
         opts,
         'workspaceSymbols'

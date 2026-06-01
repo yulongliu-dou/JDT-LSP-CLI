@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 import { initDirectModeRewriter, rewriteDirectLocations } from '../utils/directModeRewriter';
 import { analyzeFieldLifecycle } from '../../services/fieldLifecycleService';
@@ -59,7 +58,7 @@ export function registerReferencesCommand(program: Command) {
       return;
     }
     
-    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
+    const { filePath, line: resolvedLine, col: resolvedCol, sharedClient } = posResult;
     const includeDecl = cmdOptions.declaration !== false;
     const lifecycle = cmdOptions.lifecycle === true;
 
@@ -74,81 +73,76 @@ export function registerReferencesCommand(program: Command) {
         lifecycle,
         symbol: cmdOptions.symbol,
         kind: cmdOptions.kind,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
-      async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          await initDirectModeRewriter(client, projectPath);
-          const result = await client.getReferences(filePath, parseInt(resolvedLine), parseInt(resolvedCol), includeDecl);
-          const rewritten = await rewriteDirectLocations(result);
+      async (client) => {
+        await initDirectModeRewriter(client, projectPath);
+        const result = await client.getReferences(filePath, parseInt(resolvedLine), parseInt(resolvedCol), includeDecl);
+        const rewritten = await rewriteDirectLocations(result);
 
-          if (lifecycle && cmdOptions.symbol) {
-            const symbols = await client.getDocumentSymbols(filePath);
-            const flatSymbols: DocumentSymbol[] = [];
-            function flatten(syms: any[]): void {
-              for (const sym of syms) {
-                flatSymbols.push(sym);
-                if (sym.children) flatten(sym.children);
-              }
+        if (lifecycle && cmdOptions.symbol) {
+          const symbols = await client.getDocumentSymbols(filePath);
+          const flatSymbols: DocumentSymbol[] = [];
+          function flatten(syms: any[]): void {
+            for (const sym of syms) {
+              flatSymbols.push(sym);
+              if (sym.children) flatten(sym.children);
             }
-            flatten(symbols);
-
-            const fieldSym = flatSymbols.find((s: any) => {
-              const k = s.kind;
-              return (k === 'Field' || k === 8) && s.name === cmdOptions.symbol;
-            });
-
-            const fieldType = fieldSym?.detail || 'unknown';
-            const containingClass = extractClassName(filePath);
-            const numericLine = parseInt(resolvedLine);
-            const numericCol = parseInt(resolvedCol);
-
-            const lifecycleResult = await analyzeFieldLifecycle(
-              cmdOptions.symbol,
-              fieldType,
-              containingClass,
-              filePath,
-              numericLine,
-              numericCol,
-              projectPath,
-              client as any,
-              includeDecl
-            );
-
-            lifecycleResult.references = lifecycleResult.references.map(ref => {
-              const matchingRewritten = (rewritten as any[]).find(
-                (r: any) => r.uri === ref.uri &&
-                     r.range.start.line === ref.range.start.line &&
-                     r.range.start.character === ref.range.start.character
-              );
-              if (matchingRewritten) {
-                return {
-                  ...ref,
-                  originalUri: matchingRewritten.originalUri,
-                  originalRange: matchingRewritten.originalRange,
-                  source: matchingRewritten.source,
-                  note: matchingRewritten.note,
-                  lockWaitMs: matchingRewritten.lockWaitMs,
-                  lineMapping: matchingRewritten.lineMapping,
-                };
-              }
-              return ref;
-            });
-
-            return {
-              summary: lifecycleResult.summary,
-              references: lifecycleResult.references,
-              hints: lifecycleResult.hints,
-              count: lifecycleResult.references.length,
-            };
           }
+          flatten(symbols);
 
-          return { references: rewritten, count: rewritten.length };
-        } finally {
-          if (client) await client.stop();
+          const fieldSym = flatSymbols.find((s: any) => {
+            const k = s.kind;
+            return (k === 'Field' || k === 8) && s.name === cmdOptions.symbol;
+          });
+
+          const fieldType = fieldSym?.detail || 'unknown';
+          const containingClass = extractClassName(filePath);
+          const numericLine = parseInt(resolvedLine);
+          const numericCol = parseInt(resolvedCol);
+
+          const lifecycleResult = await analyzeFieldLifecycle(
+            cmdOptions.symbol,
+            fieldType,
+            containingClass,
+            filePath,
+            numericLine,
+            numericCol,
+            projectPath,
+            client as any,
+            includeDecl
+          );
+
+          lifecycleResult.references = lifecycleResult.references.map(ref => {
+            const matchingRewritten = (rewritten as any[]).find(
+              (r: any) => r.uri === ref.uri &&
+                   r.range.start.line === ref.range.start.line &&
+                   r.range.start.character === ref.range.start.character
+            );
+            if (matchingRewritten) {
+              return {
+                ...ref,
+                originalUri: matchingRewritten.originalUri,
+                originalRange: matchingRewritten.originalRange,
+                source: matchingRewritten.source,
+                note: matchingRewritten.note,
+                lockWaitMs: matchingRewritten.lockWaitMs,
+                lineMapping: matchingRewritten.lineMapping,
+              };
+            }
+            return ref;
+          });
+
+          return {
+            summary: lifecycleResult.summary,
+            references: lifecycleResult.references,
+            hints: lifecycleResult.hints,
+            count: lifecycleResult.references.length,
+          };
         }
+
+        return { references: rewritten, count: rewritten.length };
       },
       opts,
       'references'

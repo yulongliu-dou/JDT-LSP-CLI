@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 import { CompletionItemKindMap } from '../../core/types';
 
@@ -41,28 +40,25 @@ export function registerCompletionCommand(program: Command) {
       const posResult = await getPosition(file, cmdOptions, opts);
       if ('success' in posResult) { outputResult(posResult, undefined, opts.jsonCompact, opts.output); return; }
 
-      const { filePath: fp, line, col } = posResult;
+      const { filePath: fp, line, col, sharedClient } = posResult;
 
       await executeCommand('/completion', {
         project: projectPath, file: fp, line, col,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
-      }, async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          const result = await client.getCompletion(fp, parseInt(line), parseInt(col));
-          const items = result?.items || result || [];
-          const itemsArray = Array.isArray(items) ? items : [];
-          const mapped = itemsArray.map((item: any) => ({
-            ...item,
-            kind: CompletionItemKindMap[item.kind] || item.kind,
-          }));
-          return {
-            items: mapped,
-            count: mapped.length,
-            isIncomplete: result?.isIncomplete ?? false,
-          };
-        } finally { if (client) await client.stop(); }
+      }, async (client) => {
+        const result = await client.getCompletion(fp, parseInt(line), parseInt(col));
+        const items = result?.items || result || [];
+        const itemsArray = Array.isArray(items) ? items : [];
+        const mapped = itemsArray.map((item: any) => ({
+          ...item,
+          kind: CompletionItemKindMap[item.kind] || item.kind,
+        }));
+        return {
+          items: mapped,
+          count: mapped.length,
+          isIncomplete: result?.isIncomplete ?? false,
+        };
       }, opts, 'completion');
     });
 }

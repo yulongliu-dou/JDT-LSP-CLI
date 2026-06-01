@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 
 import { HOVER_HELP } from './help/hoverHelp';
@@ -53,8 +52,8 @@ export function registerHoverCommand(program: Command) {
       return;
     }
     
-    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
-    
+    const { filePath, line: resolvedLine, col: resolvedCol, sharedClient } = posResult;
+
     await executeCommand(
       '/hover',
       {
@@ -62,16 +61,11 @@ export function registerHoverCommand(program: Command) {
         file: filePath,
         line: resolvedLine,
         col: resolvedCol,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
-      async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          return await client.getHover(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
-        } finally {
-          if (client) await client.stop();
-        }
+      async (client) => {
+        return await client.getHover(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
       },
       opts,
       'hover'

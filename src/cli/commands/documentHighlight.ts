@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 import { DocumentHighlightKindMap } from '../../core/types';
 
@@ -41,21 +40,18 @@ export function registerDocumentHighlightCommand(program: Command) {
       const posResult = await getPosition(file, cmdOptions, opts);
       if ('success' in posResult) { outputResult(posResult, undefined, opts.jsonCompact, opts.output); return; }
 
-      const { filePath: fp, line, col } = posResult;
+      const { filePath: fp, line, col, sharedClient } = posResult;
 
       await executeCommand('/document-highlight', {
         project: projectPath, file: fp, line, col,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
-      }, async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          const highlights = await client.getDocumentHighlight(fp, parseInt(line), parseInt(col));
-          const mapped = Array.isArray(highlights)
-            ? highlights.map((h: any) => ({ ...h, kind: DocumentHighlightKindMap[h.kind] || h.kind }))
-            : highlights;
-          return { highlights: mapped, count: Array.isArray(mapped) ? mapped.length : 0 };
-        } finally { if (client) await client.stop(); }
+      }, async (client) => {
+        const highlights = await client.getDocumentHighlight(fp, parseInt(line), parseInt(col));
+        const mapped = Array.isArray(highlights)
+          ? highlights.map((h: any) => ({ ...h, kind: DocumentHighlightKindMap[h.kind] || h.kind }))
+          : highlights;
+        return { highlights: mapped, count: Array.isArray(mapped) ? mapped.length : 0 };
       }, opts, 'documentHighlight');
     });
 }

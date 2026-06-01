@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { resolveSymbol, buildSymbolQuery } from '../../symbolResolver';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 import { initDirectModeRewriter, rewriteDirectLocations, rewriteDirectLocation } from '../utils/directModeRewriter';
@@ -53,8 +52,8 @@ export function registerDefinitionCommand(program: Command) {
       return;
     }
     
-    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
-    
+    const { filePath, line: resolvedLine, col: resolvedCol, sharedClient } = posResult;
+
     await executeCommand(
       '/definition',
       {
@@ -65,64 +64,59 @@ export function registerDefinitionCommand(program: Command) {
         symbol: cmdOptions.symbol,
         kind: cmdOptions.kind,
         index: cmdOptions.index,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
-      async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          await initDirectModeRewriter(client, projectPath);
-          let finalLine = parseInt(resolvedLine);
-          let finalCol = parseInt(resolvedCol);
-          // 对 global 模式下解析到的外部文件，用文档符号重新精确定位
-          if (cmdOptions.global && cmdOptions.symbol && cmdOptions.kind) {
-            try {
-              const symbols = await client.getDocumentSymbols(filePath);
-              const symbolQuery = buildSymbolQuery({
-                symbol: cmdOptions.symbol,
-                kind: cmdOptions.kind,
-                index: cmdOptions.index,
-              });
-              if (symbolQuery) {
-                const result = resolveSymbol(symbols, symbolQuery, 'definition');
-                if (result.success) {
-                  finalLine = result.position.line;
-                  finalCol = result.position.character;
-                }
+      async (client) => {
+        await initDirectModeRewriter(client, projectPath);
+        let finalLine = parseInt(resolvedLine);
+        let finalCol = parseInt(resolvedCol);
+        // 对 global 模式下解析到的外部文件，用文档符号重新精确定位
+        if (cmdOptions.global && cmdOptions.symbol && cmdOptions.kind) {
+          try {
+            const symbols = await client.getDocumentSymbols(filePath);
+            const symbolQuery = buildSymbolQuery({
+              symbol: cmdOptions.symbol,
+              kind: cmdOptions.kind,
+              index: cmdOptions.index,
+            });
+            if (symbolQuery) {
+              const result = resolveSymbol(symbols, symbolQuery, 'definition');
+              if (result.success) {
+                finalLine = result.position.line;
+                finalCol = result.position.character;
               }
-            } catch {
-              console.warn('WARNING: Symbol re-resolution failed in target file, using workspace/symbol position. Result may be imprecise.');
             }
+          } catch {
+            console.warn('WARNING: Symbol re-resolution failed in target file, using workspace/symbol position. Result may be imprecise.');
           }
-          const defs = await client.getDefinition(filePath, finalLine, finalCol);
-          let result: any = defs;
-          if (defs) {
-            if (defs.uri && defs.range) {
-              result = await rewriteDirectLocation(defs);
-            } else if (Array.isArray(defs)) {
-              result = await rewriteDirectLocations(defs);
-            }
-          }
-
-          // Field kind: attach annotation info
-          if (cmdOptions.kind === 'Field' && cmdOptions.symbol && result) {
-            try {
-              const content = await import('fs').then(m => m.readFileSync(filePath, 'utf-8'));
-              const lines = content.split('\n');
-              const className = filePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.java$/, '') || '';
-              const annotations = extractAnnotations(lines, finalLine - 1, cmdOptions.symbol, className);
-
-              return {
-                definition: Array.isArray(result) ? result : [result],
-                annotations,
-              };
-            } catch { /* annotation extraction failure is non-blocking */ }
-          }
-
-          return result;
-        } finally {
-          if (client) await client.stop();
         }
+        const defs = await client.getDefinition(filePath, finalLine, finalCol);
+        let result: any = defs;
+        if (defs) {
+          if (defs.uri && defs.range) {
+            result = await rewriteDirectLocation(defs);
+          } else if (Array.isArray(defs)) {
+            result = await rewriteDirectLocations(defs);
+          }
+        }
+
+        // Field kind: attach annotation info
+        if (cmdOptions.kind === 'Field' && cmdOptions.symbol && result) {
+          try {
+            const content = await import('fs').then(m => m.readFileSync(filePath, 'utf-8'));
+            const lines = content.split('\n');
+            const className = filePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.java$/, '') || '';
+            const annotations = extractAnnotations(lines, finalLine - 1, cmdOptions.symbol, className);
+
+            return {
+              definition: Array.isArray(result) ? result : [result],
+              annotations,
+            };
+          } catch { /* annotation extraction failure is non-blocking */ }
+        }
+
+        return result;
       },
       opts,
       'definition'

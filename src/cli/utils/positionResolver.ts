@@ -23,15 +23,30 @@ export function resolveFilePath(filePath: string, projectPath: string): string {
 }
 
 /**
+ * 启动 stderr 心跳，防止 Agent 因直接模式冷启动耗时过长而超时 kill 进程。
+ * 每 2 秒向 stderr 写入一行 NDJSON 进度信息，stdout 的最终 JSON 不受影响。
+ */
+function startHeartbeat(startTime: number): NodeJS.Timeout {
+  return setInterval(() => {
+    process.stderr.write(JSON.stringify({
+      type: "progress",
+      stage: "processing",
+      elapsedMs: Date.now() - startTime,
+    }) + "\n");
+  }, 2000);
+}
+
+/**
  * 通过符号名称解析位置
- * @returns 成功返回 { line, col }，失败返回错误结果
+ * @returns 成功返回 { line, col, sharedClient? }，失败返回错误结果
+ *          sharedClient 表示在直接模式下创建的 client，调用方应复用它而非创建新 client
  */
 export async function resolvePositionBySymbol(
   filePath: string,
   projectPath: string,
   cmdOptions: any,
   opts: any
-): Promise<{ line: string; col: string } | CLIResult<any>> {
+): Promise<{ line: string; col: string; sharedClient?: JdtLsClient } | CLIResult<any>> {
   // 符号解析需要先获取文档符号
   const symbolQuery = buildSymbolQuery(cmdOptions);
   if (!symbolQuery) {
@@ -44,7 +59,8 @@ export async function resolvePositionBySymbol(
 
   // 获取文档符号
   let symbols: SymbolInfo[];
-  
+  let sharedClient: JdtLsClient | undefined;
+
   if (opts.daemon !== false) {
     // 尝试通过守护进程获取
     const symbolsResult = await sendDaemonRequest('/symbols', {
@@ -52,13 +68,16 @@ export async function resolvePositionBySymbol(
       file: filePath,
       options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
     });
-    
+
     if (!symbolsResult.success) {
-      // 守护进程不可用，回退到直接模式
+      // 守护进程不可用，回退到直接模式（保留 client 供后续复用）
+      const hb = startHeartbeat(Date.now());
       let client: JdtLsClient | null = null;
       try {
         client = await createDirectClient(opts);
         symbols = await client.getDocumentSymbols(filePath);
+        sharedClient = client; // 不销毁，留给调用方复用
+        client = null;         // 防止 finally 中 stop
       } catch (error: any) {
         return {
           success: false,
@@ -66,17 +85,21 @@ export async function resolvePositionBySymbol(
           elapsed: 0,
         };
       } finally {
+        clearInterval(hb);
         if (client) await client.stop();
       }
     } else {
       symbols = symbolsResult.data?.symbols || [];
     }
   } else {
-    // 直接模式
+    // 直接模式（保留 client 供后续复用）
+    const hb = startHeartbeat(Date.now());
     let client: JdtLsClient | null = null;
     try {
       client = await createDirectClient(opts);
       symbols = await client.getDocumentSymbols(filePath);
+      sharedClient = client; // 不销毁，留给调用方复用
+      client = null;         // 防止 finally 中 stop
     } catch (error: any) {
       return {
         success: false,
@@ -84,14 +107,19 @@ export async function resolvePositionBySymbol(
         elapsed: 0,
       };
     } finally {
+      clearInterval(hb);
       if (client) await client.stop();
     }
   }
 
   // 解析符号位置
   const result = resolveSymbol(symbols, symbolQuery);
-  
+
   if (!result.success) {
+    // 符号解析失败，清理共享 client
+    if (sharedClient) {
+      await sharedClient.stop().catch(() => {});
+    }
     return {
       success: false,
       error: result.error.message,
@@ -103,21 +131,25 @@ export async function resolvePositionBySymbol(
   return {
     line: String(result.position.line),
     col: String(result.position.character),
+    sharedClient,
   };
 }
 
 /**
  * 通过 workspace/symbol 全局解析方法位置
+ * @returns 成功返回 { filePath, line, col, sharedClient? }，失败返回错误结果
+ *          sharedClient 表示在直接模式下创建的 client，调用方应复用它而非创建新 client
  */
 export async function resolveGlobalPosition(
   methodName: string,
   projectPath: string,
   cmdOptions: any,
   opts: any
-): Promise<{ filePath: string; line: string; col: string } | CLIResult<any>> {
+): Promise<{ filePath: string; line: string; col: string; sharedClient?: JdtLsClient } | CLIResult<any>> {
   // Step 1: 使用 workspace/symbol 搜索方法
   let symbols: any[];
-  
+  let sharedClient: JdtLsClient | undefined;
+
   if (opts.daemon !== false) {
     const result = await sendDaemonRequest('/workspace-symbols', {
       project: projectPath,
@@ -126,13 +158,16 @@ export async function resolveGlobalPosition(
       limit: 20,
       options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
     });
-    
+
     if (!result.success) {
-      // 回退到直接模式
+      // 回退到直接模式（保留 client 供后续复用）
+      const hb = startHeartbeat(Date.now());
       let client: JdtLsClient | null = null;
       try {
         client = await createDirectClient(opts);
         symbols = await client.getWorkspaceSymbols(methodName, 20);
+        sharedClient = client; // 不销毁，留给调用方复用
+        client = null;
       } catch (error: any) {
         return {
           success: false,
@@ -140,16 +175,21 @@ export async function resolveGlobalPosition(
           elapsed: 0,
         };
       } finally {
+        clearInterval(hb);
         if (client) await client.stop();
       }
     } else {
       symbols = result.data?.symbols || [];
     }
   } else {
+    // 直接模式（保留 client 供后续复用）
+    const hb = startHeartbeat(Date.now());
     let client: JdtLsClient | null = null;
     try {
       client = await createDirectClient(opts);
       symbols = await client.getWorkspaceSymbols(methodName, 20);
+      sharedClient = client; // 不销毁，留给调用方复用
+      client = null;
     } catch (error: any) {
       return {
         success: false,
@@ -157,6 +197,7 @@ export async function resolveGlobalPosition(
         elapsed: 0,
       };
     } finally {
+      clearInterval(hb);
       if (client) await client.stop();
     }
   }
@@ -198,12 +239,14 @@ export async function resolveGlobalPosition(
       const signatureSource = s.detail || s.containerName || '';
       return matchSignatureUnified(signatureSource, cmdOptions.signature);
     });
-    
+
     // 如果签名过滤后有结果，使用过滤后的结果
     // 如果没有匹配，保留原结果并给出警告
     if (signatureFiltered.length > 0) {
       filtered = signatureFiltered;
     } else {
+      // 清理共享 client（全局搜索失败，后续不会用到）
+      if (sharedClient) { await sharedClient.stop().catch(() => {}); }
       return {
         success: false,
         error: `Found ${filtered.length} matches for '${methodName}', but none match signature '${cmdOptions.signature}'`,
@@ -222,12 +265,14 @@ export async function resolveGlobalPosition(
       };
     }
   }
-  
+
   if (filtered.length === 0) {
     let errorMsg = `No ${kindFilter} named '${methodName}' found in workspace`;
     if (looksLikeJdkSymbol(methodName, kindFilter)) {
       errorMsg += '\n' + buildJdkHint(methodName, kindFilter);
     }
+    // 清理共享 client（全局搜索失败，后续不会用到）
+    if (sharedClient) { await sharedClient.stop().catch(() => {}); }
     return {
       success: false,
       error: errorMsg,
@@ -237,9 +282,11 @@ export async function resolveGlobalPosition(
       elapsed: 0,
     };
   }
-  
+
   // 如果有多个匹配且未指定索引，返回歧义
   if (filtered.length > 1 && cmdOptions.index === undefined) {
+    // 清理共享 client（需要用户选择后再调用，本次不会继续）
+    if (sharedClient) { await sharedClient.stop().catch(() => {}); }
     return {
       success: false,
       error: `Found ${filtered.length} matches for '${methodName}'. Use --index to select.`,
@@ -256,12 +303,14 @@ export async function resolveGlobalPosition(
       elapsed: 0,
     };
   }
-  
+
   // 选择符号
   const selectedIdx = cmdOptions.index !== undefined ? parseInt(cmdOptions.index) : 0;
   const selected = filtered[selectedIdx];
-  
+
   if (!selected) {
+    // 清理共享 client（索引越界，本次不会继续）
+    if (sharedClient) { await sharedClient.stop().catch(() => {}); }
     return {
       success: false,
       error: `Index ${selectedIdx} out of range. Found ${filtered.length} matches.`,
@@ -289,8 +338,10 @@ export async function resolveGlobalPosition(
               filePath: resolvedFilePath,
               line: String(resolvedLine),
               col: String(resolvedCol),
+              sharedClient,  // 保留 workspace/symbol 搜索时创建的共享 client
             };
           } catch (err: any) {
+            if (sharedClient) { await sharedClient.stop().catch(() => {}); }
             return {
               success: false,
               error: `Library resolve returned invalid file URI (${resolved.uri}): ${err.message}`,
@@ -298,6 +349,7 @@ export async function resolveGlobalPosition(
             };
           }
         } else {
+          if (sharedClient) { await sharedClient.stop().catch(() => {}); }
           return {
             success: false,
             error: `Library resolve returned empty result for ${uri}. The jar class could not be resolved (check daemon logs or ensure the dependency jar is accessible).`,
@@ -305,6 +357,7 @@ export async function resolveGlobalPosition(
           };
         }
       } else {
+        if (sharedClient) { await sharedClient.stop().catch(() => {}); }
         return {
           success: false,
           error: `Library resolve failed: ${resolveResult.error || 'unknown error'}`,
@@ -313,16 +366,21 @@ export async function resolveGlobalPosition(
       }
     }
 
-    // 直接模式：尝试创建临时 client 解析 jdt:// URI
-    let client: JdtLsClient | null = null;
+    // 直接模式：复用已有 client 或创建新的解析 jdt:// URI
+    const hb = startHeartbeat(Date.now());
+    let libraryClient: JdtLsClient | null = null;
     try {
-      client = await createDirectClient(opts);
+      // 优先复用 workspace/symbol 搜索时创建的 sharedClient
+      const effectiveClient = sharedClient || await createDirectClient(opts);
+      if (!sharedClient) {
+        libraryClient = effectiveClient; // 只有新创建的才需要后续 stop
+      }
       const { LibraryClassLocator } = await import('../../libraryProvider/core/libraryClassLocator');
       const { load: loadDaemonConfig } = await import('../../libraryProvider/daemonConfigStore');
       const config = loadDaemonConfig();
       const locator = new LibraryClassLocator({
         fetcher: {
-          getClassFileContents: (jdtUri: string) => client!.getClassFileContents(jdtUri),
+          getClassFileContents: (jdtUri: string) => effectiveClient.getClassFileContents(jdtUri),
         },
         workspaceRoot: projectPath,
         javaHome: process.env.JAVA_HOME,
@@ -341,18 +399,25 @@ export async function resolveGlobalPosition(
           filePath: resolvedFilePath,
           line: String(resolvedLine),
           col: String(resolvedCol),
+          sharedClient: sharedClient || effectiveClient,  // 传递共享 client
         };
       }
     } catch (err: any) {
+      clearInterval(hb);
+      if (libraryClient) await libraryClient.stop().catch(() => {});
+      if (sharedClient) { await sharedClient.stop().catch(() => {}); }
       return {
         success: false,
         error: `Direct mode library resolve failed for ${uri}: ${err.message}`,
         elapsed: 0,
       };
     } finally {
-      if (client) await client.stop();
+      clearInterval(hb);
     }
 
+    // library resolve 失败，清理 client
+    if (sharedClient) { await sharedClient.stop().catch(() => {}); }
+    if (libraryClient) await libraryClient.stop().catch(() => {});
     return {
       success: false,
       error: 'Cannot resolve jdt:// URI. Start daemon with: jls daemon start, or ensure the jar class is accessible.',
@@ -369,24 +434,27 @@ export async function resolveGlobalPosition(
   }
   const line = (selected.location?.range?.start?.line || 0) + 1;
   const col = (selected.location?.range?.start?.character || 0) + 1;
-  
+
   return {
     filePath,
     line: String(line),
     col: String(col),
+    sharedClient,  // 保留 workspace/symbol 搜索时创建的共享 client
   };
 }
 
 /**
  * 检查是否使用符号模式，并解析位置（支持全局定位）
+ * @returns 成功返回 { filePath, line, col, sharedClient? }，失败返回错误结果
+ *          sharedClient 表示在直接模式下创建的 client，调用方应复用它而非创建新 client
  */
 export async function getPosition(
   file: string | undefined,
   cmdOptions: any,
   opts: any
-): Promise<{ filePath: string; line: string; col: string } | CLIResult<any>> {
+): Promise<{ filePath: string; line: string; col: string; sharedClient?: JdtLsClient } | CLIResult<any>> {
   const projectPath = path.resolve(opts.project);
-  
+
   // Call-hierarchy cursor 续查模式：位置信息已在 cursor 缓存中，不需要 file/line/col
   // 当 --cursor 存在且 mode 非 legacy 时，跳过位置解析
   if (cmdOptions.cursor && cmdOptions.mode && cmdOptions.mode !== 'legacy') {
@@ -396,7 +464,7 @@ export async function getPosition(
       col: '0',
     };
   }
-  
+
   // 全局定位模式：不需要文件路径
   if (cmdOptions.global && isSymbolMode(cmdOptions)) {
     // 验证 --kind 参数（全局定位必需）
@@ -408,7 +476,7 @@ export async function getPosition(
       if (cmdOptions.global) providedParams.push('--global');
       if (cmdOptions.signature) providedParams.push('--signature');
       if (cmdOptions.index !== undefined) providedParams.push('--index');
-      
+
       return {
         success: false,
         error: 'Missing required option: --kind. When using --global, you must specify --kind (e.g., Method, Class, Field, Interface).',
@@ -432,7 +500,7 @@ export async function getPosition(
     const methodName = cmdOptions.method || cmdOptions.symbol;
     return await resolveGlobalPosition(methodName, projectPath, cmdOptions, opts);
   }
-  
+
   // 检查文件参数
   if (!file) {
     if (isSymbolMode(cmdOptions)) {
@@ -453,9 +521,9 @@ export async function getPosition(
       elapsed: 0,
     };
   }
-  
+
   const filePath = resolveFilePath(file, projectPath);
-  
+
   if (!fs.existsSync(filePath)) {
     return {
       success: false,
@@ -463,14 +531,14 @@ export async function getPosition(
       elapsed: 0,
     };
   }
-  
+
   // 检查是否使用符号模式
   if (isSymbolMode(cmdOptions)) {
     const result = await resolvePositionBySymbol(filePath, projectPath, cmdOptions, opts);
     if ('success' in result) {
-      return result; // 错误结果
+      return result; // 错误结果 (doesn't have sharedClient)
     }
-    return { filePath, line: result.line, col: result.col };
+    return { filePath, line: result.line, col: result.col, sharedClient: result.sharedClient };
   }
   
   /*
@@ -563,23 +631,32 @@ export async function createDirectClient(options: any): Promise<JdtLsClient> {
 
 /**
  * 执行命令（自动选择守护进程或直接模式）
+ *
+ * 直接模式 client 生命周期统一由此函数管理：
+ * - 若 body._sharedClient 存在（由 getPosition 在直接模式下创建），则复用，不重复创建
+ * - 否则在 directHandler 执行前创建新 client，传入 directHandler，执行完毕后统一 stop
+ *
+ * @param directHandler (client) => result  — 使用共享 client 执行 LSP 操作
  */
 export async function executeCommand(
   endpoint: string,
   body: any,
-  directHandler: () => Promise<any>,
+  directHandler: (client: JdtLsClient) => Promise<any>,
   opts: any,
   commandName?: string
 ): Promise<void> {
   const startTime = Date.now();
   const compact = opts.jsonCompact;
   const outputFile = opts.output;  // 获取--output参数
-  
+
+  // 提取共享 client（由 getPosition 在直接模式下创建，避免双重冷启动）
+  const sharedClient: JdtLsClient | undefined = body._sharedClient;
+
   // 构建 resolvedPosition（游标模式除外）
   const resolvedFile = body.file;
   const resolvedLine = body.line;
   const resolvedCol = body.col;
-  
+
   function enrichResult(result: any): any {
     if (resolvedFile === '__cursor_mode__') return result;
     return {
@@ -594,27 +671,19 @@ export async function executeCommand(
       },
     };
   }
-  
-  /**
-   * 启动 stderr 心跳，防止 Agent 因直接模式冷启动耗时过长而超时 kill 进程。
-   * 每 2 秒向 stderr 写入一行 NDJSON 进度信息，stdout 的最终 JSON 不受影响。
-   */
-  function startHeartbeat(): NodeJS.Timeout {
-    return setInterval(() => {
-      process.stderr.write(JSON.stringify({
-        type: "progress",
-        stage: "processing",
-        elapsedMs: Date.now() - startTime,
-      }) + "\n");
-    }, 2000);
-  }
 
-  // 如果禁用了守护进程，使用直接模式
-  if (opts.daemon === false) {
-    const hb = startHeartbeat();
+  /**
+   * 在直接模式下：使用统一的 client（共享或新建），执行 directHandler
+   */
+  async function executeInDirectMode(reuseClient?: JdtLsClient): Promise<void> {
+    const hb = startHeartbeat(startTime);
+    let ownClient: JdtLsClient | null = null;
     try {
-      const result = await directHandler();
+      const client = reuseClient || (ownClient = await createDirectClient(opts));
+      const result = await directHandler(client);
       clearInterval(hb);
+      // 清理 client（必须在 outputResult/process.exit 之前完成）
+      await stopDirectClient(ownClient, reuseClient);
       outputResult(enrichResult({
         success: true,
         data: result,
@@ -622,19 +691,41 @@ export async function executeCommand(
       }), commandName, compact, outputFile);
     } catch (error: any) {
       clearInterval(hb);
+      // 清理 client（必须在 outputResult/process.exit 之前完成）
+      await stopDirectClient(ownClient, reuseClient);
       outputResult(enrichResult({
         success: false,
         error: error.message,
         elapsed: Date.now() - startTime,
       }), commandName, compact, outputFile);
     }
+  }
+
+  /**
+   * 停止直接模式 client — 优先 stop 自己创建的，否则 stop 传入的共享 client
+   */
+  async function stopDirectClient(ownClient: JdtLsClient | null, reuseClient?: JdtLsClient): Promise<void> {
+    try {
+      if (ownClient) await ownClient.stop();
+      else if (reuseClient) await reuseClient.stop();
+    } catch {
+      // client.stop() 失败不影响进程退出
+    }
+  }
+
+  // 如果禁用了守护进程，使用直接模式
+  if (opts.daemon === false) {
+    await executeInDirectMode(sharedClient);
     return;
   }
 
-  // 尝试守护进程模式
+  // 尝试守护进程模式（剥离内部字段，避免序列化 JdtLsClient 实例）
+  delete body._sharedClient;
   const daemonResult = await sendDaemonRequest(endpoint, body);
 
   if (daemonResult.success || !daemonResult.error?.includes('Daemon not running')) {
+    // daemon 成功：清理共享 client（daemon 已接管，不再需要）
+    if (sharedClient) { await sharedClient.stop().catch(() => {}); }
     outputResult(enrichResult(daemonResult), commandName, compact, outputFile);
     return;
   }
@@ -646,23 +737,7 @@ export async function executeCommand(
   console.error('');
   console.error('Starting in direct mode...');
 
-  const hb = startHeartbeat();
-  try {
-    const result = await directHandler();
-    clearInterval(hb);
-    outputResult(enrichResult({
-      success: true,
-      data: result,
-      elapsed: Date.now() - startTime,
-    }), commandName, compact, outputFile);
-  } catch (error: any) {
-    clearInterval(hb);
-    outputResult(enrichResult({
-      success: false,
-      error: error.message,
-      elapsed: Date.now() - startTime,
-    }), commandName, compact);
-  }
+  await executeInDirectMode(sharedClient);
 }
 
 // 需要从 outputHandler 导入，避免循环依赖

@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 import { initDirectModeRewriter, rewriteDirectLocations } from '../utils/directModeRewriter';
 
@@ -55,8 +54,8 @@ export function registerImplementationsCommand(program: Command) {
       return;
     }
     
-    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
-    
+    const { filePath, line: resolvedLine, col: resolvedCol, sharedClient } = posResult;
+
     await executeCommand(
       '/implementations',
       {
@@ -64,19 +63,14 @@ export function registerImplementationsCommand(program: Command) {
         file: filePath,
         line: resolvedLine,
         col: resolvedCol,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
-      async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          await initDirectModeRewriter(client, projectPath);
-          const result = await client.getImplementations(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
-          const rewritten = await rewriteDirectLocations(result);
-          return { implementations: rewritten, count: rewritten.length };
-        } finally {
-          if (client) await client.stop();
-        }
+      async (client) => {
+        await initDirectModeRewriter(client, projectPath);
+        const result = await client.getImplementations(filePath, parseInt(resolvedLine), parseInt(resolvedCol));
+        const rewritten = await rewriteDirectLocations(result);
+        return { implementations: rewritten, count: rewritten.length };
       },
       opts,
       'implementations'

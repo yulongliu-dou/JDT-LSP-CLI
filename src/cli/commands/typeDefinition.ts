@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { getPosition, executeCommand, createDirectClient } from '../utils/positionResolver';
+import { getPosition, executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateFileSymbolCommand } from '../utils/paramValidator';
 import { initDirectModeRewriter, rewriteDirectLocations } from '../utils/directModeRewriter';
 
@@ -56,9 +55,9 @@ export function registerTypeDefinitionCommand(program: Command) {
       return;
     }
     
-    const { filePath, line: resolvedLine, col: resolvedCol } = posResult;
+    const { filePath, line: resolvedLine, col: resolvedCol, sharedClient } = posResult;
     const explainEmpty = cmdOptions.explainEmpty || false;
-    
+
     await executeCommand(
       '/type-definition',
       {
@@ -67,28 +66,23 @@ export function registerTypeDefinitionCommand(program: Command) {
         line: resolvedLine,
         col: resolvedCol,
         explainEmpty,
+        _sharedClient: sharedClient,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
       },
-      async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          await initDirectModeRewriter(client, projectPath);
-          const result = await client.getTypeDefinition(filePath, parseInt(resolvedLine), parseInt(resolvedCol), explainEmpty);
-          // 对齐 daemon handleTypeDefinition 的格式保留逻辑
-          if (!result) return { locations: [], count: 0 };
-          if (result.locations && Array.isArray(result.locations)) {
-            result.locations = await rewriteDirectLocations(result.locations);
-            return result;
-          }
-          if (Array.isArray(result)) {
-            const rewritten = await rewriteDirectLocations(result);
-            return { locations: rewritten, count: rewritten.length };
-          }
+      async (client) => {
+        await initDirectModeRewriter(client, projectPath);
+        const result = await client.getTypeDefinition(filePath, parseInt(resolvedLine), parseInt(resolvedCol), explainEmpty);
+        // 对齐 daemon handleTypeDefinition 的格式保留逻辑
+        if (!result) return { locations: [], count: 0 };
+        if (result.locations && Array.isArray(result.locations)) {
+          result.locations = await rewriteDirectLocations(result.locations);
           return result;
-        } finally {
-          if (client) await client.stop();
         }
+        if (Array.isArray(result)) {
+          const rewritten = await rewriteDirectLocations(result);
+          return { locations: rewritten, count: rewritten.length };
+        }
+        return result;
       },
       opts,
       'typeDefinition'

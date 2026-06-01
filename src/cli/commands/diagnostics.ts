@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { executeCommand, createDirectClient } from '../utils/positionResolver';
+import { executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateDiagnosticsCommand } from '../utils/paramValidator';
 
 import { DIAGNOSTICS_HELP } from './help/diagnosticsHelp';
@@ -36,16 +35,10 @@ export function registerDiagnosticsCommand(program: Command) {
           file: filePath,
           options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
         },
-        async () => {
-          let client: JdtLsClient | null = null;
-          try {
-            client = await createDirectClient(opts);
-            const diagnostics = await client.getDiagnostics(filePath);
-            const arr = Array.isArray(diagnostics) ? diagnostics : [];
-            return { diagnostics: arr, count: arr.length };
-          } finally {
-            if (client) await client.stop();
-          }
+        async (client) => {
+          const diagnostics = await client.getDiagnostics(filePath);
+          const arr = Array.isArray(diagnostics) ? diagnostics : [];
+          return { diagnostics: arr, count: arr.length };
         },
         opts,
         'diagnostics'

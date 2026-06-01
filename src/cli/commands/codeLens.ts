@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { executeCommand, createDirectClient } from '../utils/positionResolver';
+import { executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateCodeLensCommand } from '../utils/paramValidator';
 
 import { CODE_LENS_HELP } from './help/codeLensHelp';
@@ -29,26 +28,22 @@ export function registerCodeLensCommand(program: Command) {
       await executeCommand('/code-lens', {
         project: projectPath, file: filePath,
         options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
-      }, async () => {
-        let client: JdtLsClient | null = null;
-        try {
-          client = await createDirectClient(opts);
-          const lenses = await client.getCodeLens(filePath);
-          const parsed = Array.isArray(lenses)
-            ? lenses.map((lens: any) => {
-                const data = lens.data;
-                const parsedData = Array.isArray(data) && data.length >= 3
-                  ? { fileUri: data[0], position: data[1], type: data[2] }
-                  : data;
-                return {
-                  range: lens.range,
-                  type: parsedData?.type || null,
-                  command: lens.command || null,
-                };
-              })
-            : lenses;
-          return { lenses: parsed, count: Array.isArray(parsed) ? parsed.length : 0 };
-        } finally { if (client) await client.stop(); }
+      }, async (client) => {
+        const lenses = await client.getCodeLens(filePath);
+        const parsed = Array.isArray(lenses)
+          ? lenses.map((lens: any) => {
+              const data = lens.data;
+              const parsedData = Array.isArray(data) && data.length >= 3
+                ? { fileUri: data[0], position: data[1], type: data[2] }
+                : data;
+              return {
+                range: lens.range,
+                type: parsedData?.type || null,
+                command: lens.command || null,
+              };
+            })
+          : lenses;
+        return { lenses: parsed, count: Array.isArray(parsed) ? parsed.length : 0 };
       }, opts, 'codeLens');
     });
 }

@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { executeCommand, createDirectClient } from '../utils/positionResolver';
+import { executeCommand } from '../utils/positionResolver';
 import { outputResult } from '../utils/outputHandler';
-import { JdtLsClient } from '../../jdtClient';
 import { validateFormattingCommand } from '../utils/paramValidator';
 
 import { FORMATTING_HELP } from './help/formattingHelp';
@@ -36,16 +35,10 @@ export function registerFormattingCommand(program: Command) {
           file: filePath,
           options: { verbose: opts.verbose, jdtlsPath: opts.jdtlsPath },
         },
-        async () => {
-          let client: JdtLsClient | null = null;
-          try {
-            client = await createDirectClient(opts);
-            const edits = await client.getFormatting(filePath);
-            const editsArray = Array.isArray(edits) ? edits : [];
-            return { edits: editsArray, count: editsArray.length };
-          } finally {
-            if (client) await client.stop();
-          }
+        async (client) => {
+          const edits = await client.getFormatting(filePath);
+          const editsArray = Array.isArray(edits) ? edits : [];
+          return { edits: editsArray, count: editsArray.length };
         },
         opts,
         'formatting'
